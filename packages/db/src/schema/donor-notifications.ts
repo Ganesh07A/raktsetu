@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, index } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { bloodRequests } from './blood-requests';
 import { donorProfiles } from './donor-profiles';
@@ -6,11 +6,11 @@ import { donorProfiles } from './donor-profiles';
 export const donorNotifications = pgTable(
   'donor_notifications',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
-    requestId: uuid('request_id')
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    requestId: text('request_id')
       .references(() => bloodRequests.id, { onDelete: 'cascade' })
       .notNull(),
-    donorId: uuid('donor_id')
+    donorId: text('donor_id')
       .references(() => donorProfiles.id, { onDelete: 'cascade' })
       .notNull(),
     whatsappMessageId: text('whatsapp_message_id'),

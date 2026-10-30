@@ -1,6 +1,5 @@
 import {
   pgTable,
-  uuid,
   text,
   timestamp,
   boolean,
@@ -13,7 +12,7 @@ import { bloodStock } from './blood-stock';
 export const bloodBanks = pgTable(
   'blood_banks',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
     name: text('name').notNull(),
     licenseNumber: text('license_number'),
     state: text('state').notNull(),

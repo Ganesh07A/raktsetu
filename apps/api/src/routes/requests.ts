@@ -13,6 +13,7 @@ import {
 import { mockStore } from '../services/mock-store';
 import { donorMatcher } from '../services/donor-matcher';
 import { whatsappService } from '../services/whatsapp';
+import { requestService } from '../services/request-service';
 
 export const requestRoutes = new Hono();
 
@@ -120,7 +121,7 @@ requestRoutes.post('/', async (c) => {
     expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
   };
 
-  mockStore.createRequest(newRequest);
+  await requestService.createRequest(newRequest);
 
   let compatibleDonorsCount = 0;
   let notificationsSent = 0;
@@ -145,27 +146,8 @@ requestRoutes.post('/', async (c) => {
         '$1 $2****$3'
       );
 
-      const notifSummary: DonorNotificationSummary & {
-        requestId: string;
-        donorName?: string;
-        donorBloodGroup?: BloodGroup;
-        donorPhoneMasked?: string;
-      } = {
-        id: notifId,
-        requestId,
-        donorId: donor.id,
-        donorName: donor.name,
-        donorBloodGroup: donor.bloodGroup,
-        donorPhoneMasked: maskedPhone,
-        status: 'sent',
-        sentAt: new Date().toISOString(),
-        respondedAt: null,
-      };
-
-      mockStore.addNotification(notifSummary);
-
       // Dispatch WhatsApp Business notification
-      await whatsappService.sendDonationRequest({
+      const sendResult = await whatsappService.sendDonationRequest({
         recipientPhone: donor.phone,
         donorId: donor.id,
         donorName: donor.name,
@@ -176,6 +158,18 @@ requestRoutes.post('/', async (c) => {
         unitsNeeded: newRequest.unitsNeeded,
         distanceKm: donor.distanceKm,
         language: donor.preferredLanguage || 'en',
+      });
+
+      await requestService.recordNotification({
+        id: notifId,
+        requestId,
+        donorId: donor.id,
+        whatsappMessageId: sendResult.messageId,
+        status: 'sent',
+        donorName: donor.name,
+        donorBloodGroup: donor.bloodGroup,
+        donorPhoneMasked: maskedPhone,
+        sentAt: new Date().toISOString(),
       });
 
       notificationsSent++;
@@ -193,54 +187,21 @@ requestRoutes.post('/', async (c) => {
 });
 
 // GET /api/v1/requests/:id - Get request details, status, & waiting room state
-requestRoutes.get('/:id', (c) => {
+requestRoutes.get('/:id', async (c) => {
   const { id } = c.req.param();
-  const request = mockStore.getRequest(id);
+  const details = await requestService.getRequestWithDetails(id);
 
-  if (!request) {
+  if (!details || !details.request) {
     return c.json(
       { error: `Request with ID ${id} not found` },
       404
     );
   }
 
-  const notifications = mockStore.getNotificationsForRequest(id);
-  const acceptedDonors: AcceptedDonorContact[] = [];
-
-  for (const n of notifications) {
-    if (n.status === 'accepted') {
-      const donor = mockStore.getDonorById(n.donorId);
-      if (donor) {
-        const dist = haversineDistance(
-          request.latitude,
-          request.longitude,
-          donor.latitude,
-          donor.longitude
-        );
-
-        const donorName = (donor as any).name || 'Volunteer Donor';
-        const donorPhone = (donor as any).phone || '+919999999999';
-
-        acceptedDonors.push({
-          donorId: donor.id,
-          name: donorName,
-          phone: donorPhone,
-          bloodGroup: donor.bloodGroup,
-          distanceKm: dist,
-          respondedAt: n.respondedAt || new Date().toISOString(),
-          directCallUrl: `tel:${donorPhone}`,
-          whatsappUrl: `https://wa.me/${donorPhone.replace('+', '')}?text=${encodeURIComponent(
-            `Namaste ${donorName}, thank you for accepting blood request for ${request.patientName} at ${request.hospitalName}.`
-          )}`,
-        } as any);
-      }
-    }
-  }
-
   return c.json({
-    request,
-    notifications,
-    acceptedDonors,
+    request: details.request,
+    notifications: details.notifications,
+    acceptedDonors: details.acceptedDonors,
   });
 });
 
@@ -254,8 +215,8 @@ requestRoutes.post('/:id/respond', async (c) => {
     return c.json({ error: 'Invalid JSON body' }, 400);
   }
 
-  const request = mockStore.getRequest(id);
-  if (!request) {
+  const details = await requestService.getRequestWithDetails(id);
+  if (!details || !details.request) {
     return c.json({ error: `Request ${id} not found` }, 404);
   }
 
@@ -272,17 +233,12 @@ requestRoutes.post('/:id/respond', async (c) => {
   const donorId = body.donorId || body.donorPhone;
 
   if (donorId) {
-    mockStore.updateNotificationStatus(
+    await requestService.handleDonorReply(
       id,
       donorId,
       normalizedAction,
       body.responseNote
     );
-  }
-
-  if (normalizedAction === 'accepted') {
-    request.status = 'fulfilled';
-    request.fulfillmentSource = 'donor';
   }
 
   return c.json({ success: true, status: normalizedAction });

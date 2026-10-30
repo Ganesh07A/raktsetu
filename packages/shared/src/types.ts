@@ -151,6 +151,8 @@ export interface AcceptedDonorContact {
   bloodGroup: BloodGroup;
   distanceKm: number;
   respondedAt: string;
+  directCallUrl?: string;
+  whatsappUrl?: string;
 }
 
 export interface DonorNotificationSummary {
@@ -159,6 +161,9 @@ export interface DonorNotificationSummary {
   status: NotificationStatus;
   sentAt: string | null;
   respondedAt: string | null;
+  donorName?: string;
+  donorBloodGroup?: BloodGroup;
+  donorPhoneMasked?: string;
 }
 
 export interface BloodSearchQuery {

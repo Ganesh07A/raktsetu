@@ -122,7 +122,12 @@ export class DonorMatcherService {
       }
     > = [];
 
-    const isLiveDb = Boolean(process.env.DATABASE_URL && db);
+    const isLiveDb = Boolean(
+      process.env.NODE_ENV !== 'test' &&
+      process.env.DATABASE_URL &&
+      db &&
+      process.env.MOCK_SERVICES !== 'true'
+    );
 
     if (isLiveDb) {
       try {

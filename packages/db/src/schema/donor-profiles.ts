@@ -1,6 +1,5 @@
 import {
   pgTable,
-  uuid,
   text,
   timestamp,
   boolean,
@@ -16,8 +15,8 @@ import { donorNotifications } from './donor-notifications';
 export const donorProfiles = pgTable(
   'donor_profiles',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
-    userId: uuid('user_id')
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
       .references(() => users.id, { onDelete: 'cascade' })
       .notNull()
       .unique(),

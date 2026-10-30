@@ -1,6 +1,5 @@
 import {
   pgTable,
-  uuid,
   text,
   timestamp,
   integer,
@@ -14,8 +13,8 @@ import { donorNotifications } from './donor-notifications';
 export const bloodRequests = pgTable(
   'blood_requests',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
-    requesterId: uuid('requester_id').references(() => users.id, {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    requesterId: text('requester_id').references(() => users.id, {
       onDelete: 'set null',
     }),
     bloodGroupNeeded: text('blood_group_needed', {

@@ -154,6 +154,10 @@ export class MockDataStore {
     return this.requests.get(id);
   }
 
+  public getAllRequests(): BloodRequest[] {
+    return Array.from(this.requests.values());
+  }
+
   public updateRequest(id: string, updates: Partial<BloodRequest>): boolean {
     const existing = this.requests.get(id);
     if (!existing) return false;

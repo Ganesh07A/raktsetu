@@ -133,6 +133,23 @@ describe('WhatsApp Webhook Routes (/api/v1/whatsapp)', () => {
       expect(notifs[0]!.status).toBe('accepted');
     });
 
+    it('rejects payload without signature header with 401', async () => {
+      const payload = { test: true };
+      const rawJson = JSON.stringify(payload);
+
+      const res = await app.request('/api/v1/whatsapp/webhook', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: rawJson,
+      });
+
+      expect(res.status).toBe(401);
+      const json = (await res.json()) as { error: string };
+      expect(json.error).toBe('Missing X-Hub-Signature-256 signature header');
+    });
+
     it('rejects payload with invalid HMAC signature with 401', async () => {
       const payload = { test: true };
       const rawJson = JSON.stringify(payload);
