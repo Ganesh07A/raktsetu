@@ -138,6 +138,29 @@ describe('Donor Routes (/api/v1/donors)', () => {
       const json = (await res.json()) as { error: string };
       expect(json.error).toContain('already registered');
     });
+
+    it('returns 409 conflict when registering with unformatted 10-digit duplicate of registered +91 phone', async () => {
+      const payload = {
+        name: 'Rahul Sharma 10 Digit',
+        phone: '9876543210', // 10 digits matching existing +919876543210
+        bloodGroup: 'A+',
+        latitude: 28.5672,
+        longitude: 77.21,
+        state: 'Delhi',
+        district: 'South Delhi',
+        whatsappConsent: true,
+      };
+
+      const res = await app.request('/api/v1/donors/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      expect(res.status).toBe(409);
+      const json = (await res.json()) as { error: string };
+      expect(json.error).toContain('already registered');
+    });
   });
 
   describe('GET /compatible and POST /match', () => {

@@ -5,7 +5,9 @@ import {
   donorProfiles,
   users,
   eq,
+  ne,
   and,
+  or,
 } from '@repo/db';
 import {
   type BloodRequest,
@@ -119,6 +121,199 @@ export class RequestService {
   }
 
   /**
+   * Resolve donor identity using phone number (from msg.from or registration)
+   */
+  public async findDonorByPhone(
+    phone: string
+  ): Promise<{ donorId: string; name: string; phone: string; bloodGroup: string } | null> {
+    const rawDigits = phone.replace(/\D/g, '');
+    const tenDigits = rawDigits.slice(-10);
+    const plus91 = `+91${tenDigits}`;
+
+    // 1. Live DB mode: query PostgreSQL exclusively (never fall back to mock data)
+    if (this.isLiveDb()) {
+      try {
+        const rows = await db
+          .select({
+            donorId: donorProfiles.id,
+            name: users.name,
+            phone: users.phone,
+            bloodGroup: donorProfiles.bloodGroup,
+          })
+          .from(donorProfiles)
+          .innerJoin(users, eq(donorProfiles.userId, users.id))
+          .where(
+            or(
+              eq(users.phone, phone),
+              eq(users.phone, plus91),
+              eq(users.phone, rawDigits),
+              eq(users.phone, tenDigits)
+            )
+          )
+          .limit(1);
+
+        if (rows[0]) {
+          return {
+            donorId: rows[0].donorId,
+            name: rows[0].name || 'Volunteer Donor',
+            phone: rows[0].phone,
+            bloodGroup: rows[0].bloodGroup,
+          };
+        }
+      } catch (err) {
+        console.warn('[@repo/api] Error looking up donor by phone in DB:', err);
+      }
+      return null;
+    }
+
+    // 2. Mock / Test mode: query mock store
+    const mockDonor =
+      mockStore.getDonorByPhone(phone) ||
+      mockStore.getDonorByPhone(plus91) ||
+      mockStore.getDonorByPhone(rawDigits) ||
+      mockStore.getDonorByPhone(tenDigits) ||
+      mockStore.getAllDonors().find((d) => {
+        const dDigits = ((d as any).phone || '').replace(/\D/g, '');
+        return dDigits.endsWith(tenDigits) || dDigits === rawDigits;
+      });
+
+    if (mockDonor) {
+      return {
+        donorId: mockDonor.id,
+        name: (mockDonor as any).name || 'Volunteer Donor',
+        phone: (mockDonor as any).phone || phone,
+        bloodGroup: mockDonor.bloodGroup,
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Fetch all active pending notifications for a donor (to safely handle free-text responses)
+   */
+  public async getPendingNotificationsForDonor(
+    donorId: string
+  ): Promise<Array<{ requestId: string; notificationId: string; patientName?: string; createdAt?: string }>> {
+    const results: Array<{ requestId: string; notificationId: string; patientName?: string; createdAt?: string }> = [];
+
+    // 1. Query live PostgreSQL if active (never fall back to mock data)
+    if (this.isLiveDb()) {
+      try {
+        const rows = await db
+          .select({
+            requestId: donorNotifications.requestId,
+            notificationId: donorNotifications.id,
+            status: donorNotifications.status,
+            patientName: bloodRequests.patientName,
+            requestStatus: bloodRequests.status,
+            createdAt: donorNotifications.sentAt,
+          })
+          .from(donorNotifications)
+          .innerJoin(bloodRequests, eq(donorNotifications.requestId, bloodRequests.id))
+          .where(
+            and(
+              eq(donorNotifications.donorId, donorId),
+              or(
+                eq(donorNotifications.status, 'pending'),
+                eq(donorNotifications.status, 'sent'),
+                eq(donorNotifications.status, 'delivered'),
+                eq(donorNotifications.status, 'read')
+              ),
+              or(
+                eq(bloodRequests.status, 'donors_notified'),
+                eq(bloodRequests.status, 'searching')
+              )
+            )
+          );
+
+        for (const r of rows) {
+          results.push({
+            requestId: r.requestId,
+            notificationId: r.notificationId,
+            patientName: r.patientName,
+            createdAt: r.createdAt ? r.createdAt.toISOString() : undefined,
+          });
+        }
+        return results;
+      } catch (err) {
+        console.warn('[@repo/api] Error querying pending notifications in DB:', err);
+        return [];
+      }
+    }
+
+    // 2. Mock / Test mode: query mock store
+    const allRequests = mockStore.getAllRequests();
+    for (const req of allRequests) {
+      if (req.status !== 'donors_notified' && req.status !== 'searching') continue;
+      const notifs = mockStore.getNotificationsForRequest(req.id);
+      for (const n of notifs) {
+        if (
+          n.donorId === donorId &&
+          n.status !== 'accepted' &&
+          n.status !== 'declined' &&
+          n.status !== 'failed' &&
+          n.status !== 'expired'
+        ) {
+          results.push({
+            requestId: req.id,
+            notificationId: n.id,
+            patientName: req.patientName,
+            createdAt: n.sentAt || undefined,
+          });
+        }
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Verify whether a donor has a notification for a specific request
+   */
+  public async getNotificationForDonorAndRequest(
+    requestId: string,
+    donorId: string
+  ): Promise<{ id: string; requestId: string; donorId: string; status: string } | null> {
+    if (this.isLiveDb()) {
+      try {
+        const rows = await db
+          .select({
+            id: donorNotifications.id,
+            requestId: donorNotifications.requestId,
+            donorId: donorNotifications.donorId,
+            status: donorNotifications.status,
+          })
+          .from(donorNotifications)
+          .where(
+            and(
+              eq(donorNotifications.requestId, requestId),
+              eq(donorNotifications.donorId, donorId)
+            )
+          )
+          .limit(1);
+
+        return rows[0] || null;
+      } catch (err) {
+        console.warn('[@repo/api] Error fetching notification in DB:', err);
+        return null;
+      }
+    }
+
+    const mockNotif = mockStore.getNotificationForDonorAndRequest(requestId, donorId);
+    if (mockNotif) {
+      return {
+        id: mockNotif.id,
+        requestId,
+        donorId: mockNotif.donorId,
+        status: mockNotif.status,
+      };
+    }
+
+    return null;
+  }
+
+  /**
    * Handle donor reply (accept or decline) from WhatsApp webhook or direct deep-link
    */
   public async handleDonorReply(
@@ -126,50 +321,80 @@ export class RequestService {
     donorIdentifier: string,
     action: 'accepted' | 'declined',
     note?: string
-  ): Promise<{ success: boolean; requestStatus: RequestStatus }> {
+  ): Promise<{ success: boolean; duplicate?: boolean; requestStatus: RequestStatus }> {
     if (!this.isLiveDb()) {
       return mockStore.simulateDonorReply(requestId, donorIdentifier, action, note);
     }
 
     // Live DB Mode
-    let mockResult: { success: boolean; requestStatus: RequestStatus } | null = null;
-    try {
-      mockResult = mockStore.simulateDonorReply(requestId, donorIdentifier, action, note);
-    } catch {
-      // Mock store didn't find request, check DB next
+    const respondedAt = new Date();
+
+    // Resolve donorId if donorIdentifier is a phone number
+    let resolvedDonorId = donorIdentifier;
+    if (donorIdentifier.startsWith('+') || /^\d{10,13}$/.test(donorIdentifier)) {
+      const donor = await this.findDonorByPhone(donorIdentifier);
+      if (donor) {
+        resolvedDonorId = donor.donorId;
+      }
     }
 
-    try {
-      const dbReq = await db
+    return await db.transaction(async (tx) => {
+      // 1. Fetch request with row-level lock (FOR UPDATE)
+      const dbReq = await tx
         .select()
         .from(bloodRequests)
         .where(eq(bloodRequests.id, requestId))
+        .for('update')
         .limit(1);
 
-      if (!dbReq[0] && !mockResult) {
+      if (!dbReq[0]) {
         throw new Error(`Request not found: ${requestId}`);
       }
 
-      const respondedAt = new Date();
+      const currentReqStatus = dbReq[0].status as RequestStatus;
 
-      // Resolve donorId if donorIdentifier is phone
-      let resolvedDonorId = donorIdentifier;
-      if (donorIdentifier.startsWith('+') || /^\d{10,13}$/.test(donorIdentifier)) {
-        const cleanPhone = donorIdentifier.replace(/\D/g, '');
-        const donorUser = await db
-          .select({ donorId: donorProfiles.id })
-          .from(donorProfiles)
-          .innerJoin(users, eq(donorProfiles.userId, users.id))
-          .where(eq(users.phone, donorIdentifier.startsWith('+') ? donorIdentifier : `+${donorIdentifier}`))
-          .limit(1);
-
-        if (donorUser[0]) {
-          resolvedDonorId = donorUser[0].donorId;
-        }
+      // Reject responding to cancelled or expired requests
+      if (currentReqStatus === 'cancelled' || currentReqStatus === 'expired') {
+        throw new Error(`Cannot respond to a ${currentReqStatus} request`);
       }
 
-      // Update donor notification row
-      await db
+      // 2. Fetch existing notification with row-level lock (FOR UPDATE)
+      const existingNotif = await tx
+        .select()
+        .from(donorNotifications)
+        .where(
+          and(
+            eq(donorNotifications.requestId, requestId),
+            eq(donorNotifications.donorId, resolvedDonorId)
+          )
+        )
+        .for('update')
+        .limit(1);
+
+      if (!existingNotif[0]) {
+        throw new Error(`Donor notification not found for request ${requestId} and donor ${resolvedDonorId}`);
+      }
+
+      const notif = existingNotif[0];
+
+      // Reject responding if notification itself is expired or failed
+      if (notif.status === 'expired' || notif.status === 'failed') {
+        throw new Error(`Cannot respond to a ${notif.status} notification`);
+      }
+
+      // 3. Duplicate check (idempotent)
+      if (notif.status === action) {
+        return {
+          success: true,
+          duplicate: true,
+          requestStatus: currentReqStatus,
+        };
+      }
+
+      const previousStatus = notif.status;
+
+      // 4. Update notification row atomically and check affected rows
+      const updatedRows = await tx
         .update(donorNotifications)
         .set({
           status: action,
@@ -181,27 +406,84 @@ export class RequestService {
             eq(donorNotifications.requestId, requestId),
             eq(donorNotifications.donorId, resolvedDonorId)
           )
-        );
+        )
+        .returning();
 
-      // If donor accepted, transition blood request to fulfilled
+      if (updatedRows.length === 0) {
+        throw new Error(`Failed to update donor notification: database update affected 0 rows`);
+      }
+
+      let newRequestStatus = currentReqStatus;
+
+      // 5. State transitions for blood_requests with race protection
       if (action === 'accepted') {
-        await db
+        const updatedReqRows = await tx
           .update(bloodRequests)
           .set({
             status: 'fulfilled',
             fulfillmentSource: 'donor',
           })
-          .where(eq(bloodRequests.id, requestId));
+          .where(
+            and(
+              eq(bloodRequests.id, requestId),
+              ne(bloodRequests.status, 'cancelled'),
+              ne(bloodRequests.status, 'expired')
+            )
+          )
+          .returning();
+
+        if (updatedReqRows.length === 0) {
+          throw new Error(`Failed to fulfill request: request ${requestId} was cancelled or expired`);
+        }
+        newRequestStatus = 'fulfilled';
+      } else if (action === 'declined') {
+        // If donor previously accepted, revert request to donors_notified if no other accepted donors remain
+        if (previousStatus === 'accepted') {
+          const otherAccepted = await tx
+            .select({ id: donorNotifications.id })
+            .from(donorNotifications)
+            .where(
+              and(
+                eq(donorNotifications.requestId, requestId),
+                eq(donorNotifications.status, 'accepted'),
+                ne(donorNotifications.donorId, resolvedDonorId)
+              )
+            );
+
+          if (otherAccepted.length === 0 && currentReqStatus === 'fulfilled') {
+            const revertedRows = await tx
+              .update(bloodRequests)
+              .set({
+                status: 'donors_notified',
+                fulfillmentSource: null,
+              })
+              .where(
+                and(
+                  eq(bloodRequests.id, requestId),
+                  eq(bloodRequests.status, 'fulfilled')
+                )
+              )
+              .returning();
+
+            if (revertedRows.length > 0) {
+              newRequestStatus = 'donors_notified';
+            }
+          }
+        }
+      }
+
+      // Keep mockStore in sync for fallback
+      try {
+        mockStore.simulateDonorReply(requestId, resolvedDonorId, action, note);
+      } catch {
+        // Ignore mock store sync failure
       }
 
       return {
         success: true,
-        requestStatus: action === 'accepted' ? 'fulfilled' : (mockResult?.requestStatus ?? 'donors_notified'),
+        requestStatus: newRequestStatus,
       };
-    } catch (err) {
-      if (mockResult) return mockResult;
-      throw err;
-    }
+    });
   }
 
   /**

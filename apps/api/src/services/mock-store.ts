@@ -115,6 +115,10 @@ export class MockDataStore {
     return [...this.donors];
   }
 
+  public getAllDonors(): DonorProfile[] {
+    return [...this.donors];
+  }
+
   public getDonorById(id: string): DonorProfile | undefined {
     return this.donors.find((d) => d.id === id);
   }
@@ -176,6 +180,14 @@ export class MockDataStore {
     return this.notifications.get(requestId) || [];
   }
 
+  public getNotificationForDonorAndRequest(
+    requestId: string,
+    donorId: string
+  ): DonorNotificationSummary | undefined {
+    const list = this.notifications.get(requestId);
+    return list?.find((n) => n.donorId === donorId);
+  }
+
   public updateNotificationStatus(
     requestId: string,
     donorId: string,
@@ -215,21 +227,59 @@ export class MockDataStore {
     donorIdentifier: string,
     action: 'accepted' | 'declined',
     note?: string
-  ): { success: boolean; requestStatus: RequestStatus } {
+  ): { success: boolean; duplicate?: boolean; requestStatus: RequestStatus } {
     const request = this.requests.get(requestId);
     if (!request) {
       throw new Error(`Request not found: ${requestId}`);
+    }
+
+    if (request.status === 'cancelled' || request.status === 'expired') {
+      throw new Error(`Cannot respond to a ${request.status} request`);
     }
 
     const donor =
       this.getDonorById(donorIdentifier) || this.getDonorByPhone(donorIdentifier);
 
     const donorId = donor ? donor.id : donorIdentifier;
-    this.updateNotificationStatus(requestId, donorId, action, note);
+    const notifs = this.notifications.get(requestId);
+    const existingNotif = notifs?.find((n) => n.donorId === donorId);
+    if (!existingNotif) {
+      throw new Error(`Notification not found for request ${requestId} and donor ${donorId}`);
+    }
+
+    if (existingNotif.status === 'expired' || existingNotif.status === 'failed') {
+      throw new Error(`Cannot respond to a ${existingNotif.status} notification`);
+    }
+
+    // Idempotent duplicate check
+    if (existingNotif.status === action) {
+      return {
+        success: true,
+        duplicate: true,
+        requestStatus: request.status,
+      };
+    }
+
+    const previousStatus = existingNotif.status;
+    const updated = this.updateNotificationStatus(requestId, donorId, action, note);
+    if (!updated) {
+      throw new Error(`Failed to update notification status for donor ${donorId}`);
+    }
 
     if (action === 'accepted') {
       request.status = 'fulfilled';
       request.fulfillmentSource = 'donor';
+    } else if (action === 'declined') {
+      // If donor previously accepted, revert request to donors_notified if no other accepted donors remain
+      if (previousStatus === 'accepted') {
+        const otherAccepted = (notifs || []).some(
+          (n) => n.donorId !== donorId && n.status === 'accepted'
+        );
+        if (!otherAccepted && request.status === 'fulfilled') {
+          request.status = 'donors_notified';
+          request.fulfillmentSource = null;
+        }
+      }
     }
 
     return {

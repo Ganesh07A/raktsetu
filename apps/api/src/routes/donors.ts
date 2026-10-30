@@ -7,10 +7,20 @@ import {
   type DonorProfile,
   type SupportedLanguage,
 } from '@repo/shared';
+import { db, users, donorProfiles, eq, or } from '@repo/db';
 import { mockStore } from '../services/mock-store';
 import { donorMatcher } from '../services/donor-matcher';
 
 export const donorRoutes = new Hono();
+
+const isLiveDb = (): boolean => {
+  return Boolean(
+    process.env.NODE_ENV !== 'test' &&
+    process.env.DATABASE_URL &&
+    db &&
+    process.env.MOCK_SERVICES !== 'true'
+  );
+};
 
 // POST /api/v1/donors/register
 donorRoutes.post('/register', async (c) => {
@@ -66,14 +76,8 @@ donorRoutes.post('/register', async (c) => {
     return c.json({ error: 'Valid latitude and longitude required' }, 400);
   }
 
-  // Check for duplicate phone
-  const existing = mockStore.getDonorByPhone(normalizedPhone);
-  if (existing) {
-    return c.json(
-      { error: 'Donor with this phone number is already registered' },
-      409
-    );
-  }
+  const rawDigits = normalizedPhone.replace(/\D/g, '');
+  const tenDigits = rawDigits.slice(-10);
 
   const donorId = `donor-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const userId = `user-${Date.now()}`;
@@ -103,6 +107,83 @@ donorRoutes.post('/register', async (c) => {
   (newDonor as any).name = body.name || 'Anonymous Donor';
   (newDonor as any).phone = normalizedPhone;
   (newDonor as any).preferredLanguage = body.preferredLanguage || 'en';
+
+  // 1. Live DB mode: perform duplicate phone check & persistence against PostgreSQL only
+  if (isLiveDb()) {
+    try {
+      await db.transaction(async (tx) => {
+        const existingUser = await tx
+          .select({ id: users.id })
+          .from(users)
+          .where(
+            or(
+              eq(users.phone, normalizedPhone),
+              eq(users.phone, rawDigits),
+              eq(users.phone, tenDigits)
+            )
+          )
+          .limit(1);
+
+        if (existingUser[0]) {
+          throw new Error('DUPLICATE_PHONE');
+        }
+
+        await tx.insert(users).values({
+          id: userId,
+          phone: normalizedPhone,
+          name: body.name || 'Anonymous Donor',
+          email: body.email || null,
+          role: 'donor',
+          preferredLanguage: body.preferredLanguage || 'en',
+        });
+
+        await tx.insert(donorProfiles).values({
+          id: donorId,
+          userId: userId,
+          bloodGroup: body.bloodGroup,
+          latitude: body.latitude,
+          longitude: body.longitude,
+          state: body.state || 'Delhi',
+          district: body.district || 'South Delhi',
+          city: body.city || null,
+          dateOfBirth: body.dateOfBirth || null,
+          gender: body.gender || 'other',
+          weightKg: body.weightKg || null,
+          lastDonationDate: body.lastDonationDate || null,
+          isAvailable: body.isAvailable ?? true,
+          searchRadiusKm: body.searchRadiusKm || 10,
+          whatsappConsent: true,
+        });
+      });
+    } catch (err: any) {
+      if (
+        err?.message === 'DUPLICATE_PHONE' ||
+        err?.code === '23505' ||
+        err?.message?.includes('duplicate key') ||
+        err?.message?.includes('unique')
+      ) {
+        return c.json(
+          { error: 'Donor with this phone number is already registered' },
+          409
+        );
+      }
+      console.warn('[@repo/api] Error registering donor in DB transaction:', err);
+      return c.json({ error: 'Failed to register donor' }, 500);
+    }
+  } else {
+    // 2. Mock / test mode: perform duplicate check against mockStore only
+    const existing =
+      mockStore.getDonorByPhone(normalizedPhone) ||
+      mockStore.getDonorByPhone(rawDigits) ||
+      mockStore.getDonorByPhone(tenDigits);
+
+    if (existing) {
+      return c.json(
+        { error: 'Donor with this phone number is already registered' },
+        409
+      );
+    }
+  }
 
   mockStore.addDonor(newDonor);
 

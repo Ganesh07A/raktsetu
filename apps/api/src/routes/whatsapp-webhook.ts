@@ -60,6 +60,123 @@ const handleChallenge = (c: any) => {
 whatsappWebhookRoutes.get('/webhook', handleChallenge);
 whatsappWebhookRoutes.get('/', handleChallenge);
 
+/**
+ * Parse and classify donor free-text intent into 'accepted' | 'declined' | null.
+ *
+ * Rules:
+ * 1. Normalize whitespace, smart quotes, and punctuation.
+ * 2. Evaluate negative phrases and negation BEFORE positive keywords.
+ * 3. Never treat standalone ambiguous words ("ready", "available", "agree") as acceptance without affirmative context.
+ * 4. Contradictory messages containing both affirmative and negative intent must return null (unprocessed).
+ */
+export function parseDonorTextIntent(rawText: string): 'accepted' | 'declined' | null {
+  if (!rawText) return null;
+
+  // 1. Normalize whitespace, smart quotes, and punctuation
+  const normalized = rawText
+    .toLowerCase()
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[,\.!?;:]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!normalized) return null;
+
+  // 2. Evaluate negative phrases and negation patterns
+  const NEGATIVE_PHRASES = [
+    /\bnot\s+ready(\s+to\s+donate)?\b/,
+    /\bnot\s+available(\s+to\s+donate)?\b/,
+    /\bnot\s+willing(\s+to\s+donate)?\b/,
+    /\bnot\s+happy(\s+to\s+donate)?\b/,
+    /\bnot\s+able\s+to\s+donate\b/,
+    /\bunable\s+to\s+donate\b/,
+    /\b(don't|dont|do\s+not)\s+agree\b/,
+    /\b(don't|dont|do\s+not)\s+accept\b/,
+    /\bnot\s+accept(ed)?\b/,
+    /\bnot\s+sure\b/,
+    /\b(can't|cant|cannot|can\s+not|will\s+not|won't|wont)\s+donate\b/,
+    /\b(can't|cant|cannot|can\s+not)\s+come\b/,
+    /\b(can't|cant|cannot|can\s+not)\s+help\b/,
+    /\bnot\s+possible\b/,
+    /\bnot\s+donating\b/,
+  ];
+
+  const NEGATIVE_TOKENS = [
+    /\bno\b/,
+    /\bdecline\b/,
+    /\bdeclined\b/,
+    /\bnahi\b/,
+    /\bna\b/,
+    /\bcannot\b/,
+    /\bcan't\b/,
+    /\bcant\b/,
+    /\brefuse\b/,
+    /\brefused\b/,
+    /\bbusy\b/,
+    /\bunable\b/,
+    /\bcancel\b/,
+    /\bcancelled\b/,
+  ];
+
+  // Check if any negative phrase matches the normalized text
+  // Mask matched negative phrases out of textForAffirmative so negated phrases don't falsely trigger affirmative match
+  let textForAffirmative = normalized;
+  let hasNegativePhrase = false;
+  for (const regex of NEGATIVE_PHRASES) {
+    if (regex.test(normalized)) {
+      hasNegativePhrase = true;
+      textForAffirmative = textForAffirmative.replace(new RegExp(regex.source, 'gi'), ' ');
+    }
+  }
+  textForAffirmative = textForAffirmative.replace(/\s+/g, ' ').trim();
+
+  const hasNegativeToken = NEGATIVE_TOKENS.some((regex) => regex.test(normalized));
+  const isNegative = hasNegativePhrase || hasNegativeToken;
+
+  // 3. Evaluate affirmative intent on text where negative phrases were stripped
+  // Affirmative phrases: require clear context (not standalone ambiguous words like "ready", "available", "agree")
+  const AFFIRMATIVE_PHRASES = [
+    /\b(i\s+can|can)\s+donate\b/,
+    /\b(i\s+will|will)\s+donate\b/,
+    /\b(ready|willing|happy)\s+to\s+donate\b/,
+    /\bavailable\s+to\s+donate\b/,
+    /\b(i\s+am|im|i'm)\s+ready\b/,
+    /\b(i\s+am|im|i'm)\s+available\b/,
+    /\b(i)\s+agree\b/,
+  ];
+
+  const AFFIRMATIVE_TOKENS = [
+    /\byes\b/,
+    /\bhaan\b/,
+    /\bha\b/,
+    /\baccept\b/,
+    /\baccepted\b/,
+    /\bsure\b/,
+    /\bdefinitely\b/,
+    /\babsolutely\b/,
+  ];
+
+  const hasAffirmativePhrase = AFFIRMATIVE_PHRASES.some((regex) => regex.test(textForAffirmative));
+  const hasAffirmativeToken = AFFIRMATIVE_TOKENS.some((regex) => regex.test(textForAffirmative));
+  const isAffirmative = hasAffirmativePhrase || hasAffirmativeToken;
+
+  // 4. If contradictory (both affirmative and negative intent present), return null (unprocessed)
+  if (isAffirmative && isNegative) {
+    return null;
+  }
+
+  if (isAffirmative) {
+    return 'accepted';
+  }
+
+  if (isNegative) {
+    return 'declined';
+  }
+
+  return null;
+}
+
 // Inbound webhook event handler
 const handleWebhookEvent = async (c: any) => {
   const appSecret = process.env.WHATSAPP_APP_SECRET;
@@ -103,6 +220,14 @@ const handleWebhookEvent = async (c: any) => {
       // 2. Handle interactive button clicks (Accept / Decline) and direct text replies
       if (Array.isArray(val.messages)) {
         for (const msg of val.messages) {
+          const senderPhone = msg.from;
+          if (!senderPhone) {
+            continue;
+          }
+
+          // Resolve sender to registered donor via phone lookup
+          const senderDonor = await requestService.findDonorByPhone(senderPhone);
+
           // A. Interactive Quick-Reply Button Click
           if (msg.type === 'interactive' && msg.interactive?.type === 'button_reply') {
             const btnId = msg.interactive.button_reply.id as string;
@@ -110,44 +235,147 @@ const handleWebhookEvent = async (c: any) => {
             const parts = btnId.split('_');
             if (parts.length >= 2) {
               const rawAction = parts[0];
-              const action = rawAction === 'accept' ? 'accepted' : 'declined';
+              if (rawAction !== 'accept' && rawAction !== 'decline') {
+                console.warn(
+                  `[@repo/api] Invalid button reply action: "${rawAction}" in button ID ${btnId}. Rejecting.`
+                );
+                continue;
+              }
+              const action: 'accepted' | 'declined' = rawAction === 'accept' ? 'accepted' : 'declined';
               const requestId = parts[1];
-              let donorId = parts.slice(2).join('_');
+              const encodedDonorId = parts.slice(2).join('_');
 
-              // If donorId is missing in button payload, resolve by sender's phone
-              if (!donorId && msg.from) {
-                const donor = mockStore.getDonorByPhone(msg.from);
-                if (donor) donorId = donor.id;
+              if (!requestId) {
+                continue;
               }
 
-              if (requestId && (donorId || msg.from)) {
-                await requestService.handleDonorReply(requestId, donorId || msg.from, action);
+              // 1. Reject if sender is not a registered donor
+              if (!senderDonor) {
+                console.warn(
+                  `[@repo/api] Unauthorized button response: sender ${senderPhone} is not a registered donor`
+                );
+                continue;
+              }
+
+              // 2. Verify resolved donor matches encoded donorId (never trust payload alone)
+              if (encodedDonorId && encodedDonorId !== senderDonor.donorId) {
+                console.warn(
+                  `[@repo/api] Donor mismatch: sender donorId ${senderDonor.donorId} does not match button donorId ${encodedDonorId}`
+                );
+                continue;
+              }
+
+              // 3. Verify sender has a matching notification for this exact request
+              const existingNotif = await requestService.getNotificationForDonorAndRequest(
+                requestId,
+                senderDonor.donorId
+              );
+              if (!existingNotif) {
+                console.warn(
+                  `[@repo/api] Rejected button response: sender ${senderDonor.donorId} has no notification for request ${requestId}`
+                );
+                continue;
+              }
+
+              if (requestId) {
+                try {
+                  await requestService.handleDonorReply(requestId, senderDonor.donorId, action);
+                } catch (err) {
+                  console.error(`[@repo/api] Error handling button reply:`, err);
+                }
               }
             }
           }
 
           // B. Direct Text Reply (Donor types "YES", "ACCEPT", "NO", "DECLINE")
-          if (msg.type === 'text' && msg.text?.body && msg.from) {
-            const textBody = msg.text.body.trim().toLowerCase();
-            let action: 'accepted' | 'declined' | null = null;
-            if (/^(yes|accept|haan|ha|i can donate|ready|available)/i.test(textBody)) {
-              action = 'accepted';
-            } else if (/^(no|decline|nahi|not available|cannot|busy|cancel)/i.test(textBody)) {
-              action = 'declined';
-            }
+          if (msg.type === 'text' && msg.text?.body) {
+            const textBody = msg.text.body;
+            const action = parseDonorTextIntent(textBody);
 
             if (action) {
-              const donor = mockStore.getDonorByPhone(msg.from);
-              const donorId = donor ? donor.id : msg.from;
-              const allRequests = mockStore.getAllRequests();
-              for (const req of allRequests) {
-                const notifs = mockStore.getNotificationsForRequest(req.id);
-                const hasPending = notifs.some(
-                  (n) => (n.donorId === donorId || n.donorId === donor?.id) && n.status !== 'accepted' && n.status !== 'declined'
+              // 1. Reject if sender is not a registered donor
+              if (!senderDonor) {
+                console.warn(
+                  `[@repo/api] Unauthorized text response: sender ${senderPhone} is not a registered donor`
                 );
-                if (hasPending) {
-                  await requestService.handleDonorReply(req.id, donorId, action, textBody);
-                  break;
+                continue;
+              }
+
+              // 2. Resolve pending notifications for this donor from database & mock store
+              const pendingNotifs = await requestService.getPendingNotificationsForDonor(
+                senderDonor.donorId
+              );
+
+              if (pendingNotifs.length === 0) {
+                console.info(
+                  `[@repo/api] No pending requests found for donor ${senderDonor.donorId}`
+                );
+                continue;
+              }
+
+              const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+              if (pendingNotifs.length === 1) {
+                // Exactly one pending request - check it does not conflict with a specific request ID token mentioned
+                const single = pendingNotifs[0]!;
+                const mentionedReqIds = textBody.match(/\breq-[a-z0-9-]+\b/gi);
+                if (
+                  mentionedReqIds &&
+                  !mentionedReqIds.some((id: string) => id.toLowerCase() === single.requestId.toLowerCase())
+                ) {
+                  console.warn(
+                    `[@repo/api] Conflicting request ID in text: mentioned ${mentionedReqIds.join(', ')} does not match pending ${single.requestId}`
+                  );
+                  continue;
+                }
+
+                try {
+                  await requestService.handleDonorReply(
+                    single.requestId,
+                    senderDonor.donorId,
+                    action,
+                    textBody
+                  );
+                } catch (err) {
+                  console.error(`[@repo/api] Error handling text reply:`, err);
+                }
+              } else {
+                // Ambiguous: donor has multiple pending requests
+                // Find matching requests by exact token request ID or full patient name (>= 3 chars)
+                const matching = pendingNotifs.filter((p) => {
+                  const reqIdRegex = new RegExp(`\\b${escapeRegex(p.requestId)}\\b`, 'i');
+                  const reqIdMatch = reqIdRegex.test(textBody);
+                  let nameMatch = false;
+                  if (p.patientName && p.patientName.trim().length >= 3) {
+                    const cleanPatient = p.patientName.trim();
+                    const nameRegex = new RegExp(`\\b${escapeRegex(cleanPatient)}\\b`, 'i');
+                    nameMatch = nameRegex.test(textBody);
+                  }
+                  return reqIdMatch || nameMatch;
+                });
+
+                if (matching.length === 1) {
+                  try {
+                    await requestService.handleDonorReply(
+                      matching[0]!.requestId,
+                      senderDonor.donorId,
+                      action,
+                      textBody
+                    );
+                  } catch (err) {
+                    console.error(
+                      `[@repo/api] Error handling disambiguated text reply:`,
+                      err
+                    );
+                  }
+                } else if (matching.length > 1) {
+                  console.warn(
+                    `[@repo/api] Ambiguous reply from donor ${senderDonor.donorId}: multiple matching requests (${matching.length}) found in text. Refusing arbitrary selection.`
+                  );
+                } else {
+                  console.warn(
+                    `[@repo/api] Ambiguous reply from donor ${senderDonor.donorId}: ${pendingNotifs.length} active pending requests with no matching identifier in text. Refusing arbitrary selection.`
+                  );
                 }
               }
             }
