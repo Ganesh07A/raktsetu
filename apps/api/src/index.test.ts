@@ -65,6 +65,7 @@ describe('API Server Endpoints', () => {
   });
 
   it('GET /api/v1/whatsapp/webhook handles challenge correctly', async () => {
+    process.env.WHATSAPP_VERIFY_TOKEN = 'raktkhoj_verify_token';
     const res = await app.request(
       '/api/v1/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=raktkhoj_verify_token&hub.challenge=test_challenge'
     );

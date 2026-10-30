@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { createHmac } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { mockStore } from '../services/mock-store';
 import { requestService } from '../services/request-service';
 
@@ -15,35 +15,42 @@ export function verifyWhatsAppSignature(
   appSecret: string
 ): boolean {
   if (!signatureHeader || !appSecret) return false;
-  const parts = signatureHeader.split('=');
-  const signature = parts.length === 2 ? parts[1] : signatureHeader;
-  const expected = computeHmacSha256(rawBody, appSecret);
-  return signature === expected;
+
+  // Header must strictly match: sha256=<64 hexadecimal characters>
+  const match = signatureHeader.trim().match(/^sha256=([0-9a-fA-F]{64})$/);
+  if (!match || !match[1]) {
+    return false;
+  }
+
+  const signatureHex = match[1].toLowerCase();
+  const expectedHex = computeHmacSha256(rawBody, appSecret);
+
+  try {
+    const signatureBuffer = Buffer.from(signatureHex, 'hex');
+    const expectedBuffer = Buffer.from(expectedHex, 'hex');
+
+    if (signatureBuffer.length !== 32 || expectedBuffer.length !== 32) {
+      return false;
+    }
+
+    return timingSafeEqual(signatureBuffer, expectedBuffer);
+  } catch {
+    return false;
+  }
 }
 
 // Hub challenge verification handler
 const handleChallenge = (c: any) => {
+  const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
+  if (!verifyToken) {
+    return c.text('WHATSAPP_VERIFY_TOKEN is not configured', 503);
+  }
+
   const mode = c.req.query('hub.mode');
   const token = c.req.query('hub.verify_token');
   const challenge = c.req.query('hub.challenge');
 
-  const configuredToken = process.env.WHATSAPP_VERIFY_TOKEN;
-  const isTest = process.env.NODE_ENV === 'test';
-  const verifyToken =
-    configuredToken ||
-    (isTest ? 'raktkhoj_webhook_test_token_2026' : undefined);
-
-  if (!verifyToken) {
-    console.error('[@repo/api] WHATSAPP_VERIFY_TOKEN is not configured in environment');
-    return c.text('Forbidden: Server missing WHATSAPP_VERIFY_TOKEN', 403);
-  }
-
-  // In test mode, allow both test fixture tokens used in unit test suites
-  const isValidToken =
-    token === verifyToken ||
-    (isTest && (token === 'raktkhoj_verify_token' || token === 'raktkhoj_webhook_test_token_2026'));
-
-  if (mode === 'subscribe' && isValidToken) {
+  if (mode === 'subscribe' && token === verifyToken) {
     return c.text(challenge || '', 200);
   }
 
@@ -55,23 +62,17 @@ whatsappWebhookRoutes.get('/', handleChallenge);
 
 // Inbound webhook event handler
 const handleWebhookEvent = async (c: any) => {
-  const rawText = await c.req.text();
-  const signatureHeader = c.req.header('X-Hub-Signature-256');
-  const configuredSecret = process.env.WHATSAPP_APP_SECRET;
-  const appSecret =
-    configuredSecret ||
-    (process.env.NODE_ENV === 'test' ? 'raktkhoj_app_secret_test_xyz' : undefined);
+  const appSecret = process.env.WHATSAPP_APP_SECRET;
+  if (!appSecret) {
+    return c.json({ error: 'WHATSAPP_APP_SECRET is not configured' }, 503);
+  }
 
-  // 1. Mandatory signature verification: reject requests without signature
+  const signatureHeader = c.req.header('X-Hub-Signature-256');
   if (!signatureHeader) {
     return c.json({ error: 'Missing X-Hub-Signature-256 signature header' }, 401);
   }
 
-  if (!appSecret) {
-    console.error('[@repo/api] WHATSAPP_APP_SECRET is not configured; cannot verify webhook');
-    return c.json({ error: 'Server WHATSAPP_APP_SECRET not configured' }, 500);
-  }
-
+  const rawText = await c.req.text();
   if (!verifyWhatsAppSignature(rawText, signatureHeader, appSecret)) {
     return c.json({ error: 'Invalid signature' }, 401);
   }
