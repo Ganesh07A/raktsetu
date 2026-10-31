@@ -20,8 +20,8 @@ self.addEventListener('notificationclick', (event) => {
 importScripts('/firebase-config.js');
 if (self.__RAKTSETU_FIREBASE_CONFIG__?.apiKey) {
   importScripts(
-    'https://www.gstatic.com/firebasejs/12.5.0/firebase-app-compat.js',
-    'https://www.gstatic.com/firebasejs/12.5.0/firebase-messaging-compat.js'
+    'https://www.gstatic.com/firebasejs/13.1.0/firebase-app-compat.js',
+    'https://www.gstatic.com/firebasejs/13.1.0/firebase-messaging-compat.js'
   );
   firebase.initializeApp(self.__RAKTSETU_FIREBASE_CONFIG__);
   const messaging = firebase.messaging();

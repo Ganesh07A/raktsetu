@@ -54,9 +54,10 @@ export class PushNotificationService {
     }
 
     const title = 'A patient needs your help!';
+    const article = /^[AO]/i.test(params.bloodGroup) ? 'An' : 'A';
     const body = params.language === 'hi'
       ? `आपके निकट ${params.bloodGroup} रक्तदाता की तत्काल आवश्यकता है।`
-      : `An ${params.bloodGroup} blood donor is urgently needed near your registered location.`;
+      : `${article} ${params.bloodGroup} blood donor is urgently needed near your registered location.`;
     const responsePath =
       `/${params.language || 'en'}/donor/respond/${encodeURIComponent(params.requestId)}` +
       `?responseToken=${encodeURIComponent(params.responseToken)}`;
