@@ -138,7 +138,6 @@ bloodBankRoutes.get('/search', async (c) => {
       }
     }
 
-    matchedBanks.sort((a, b) => a.distanceKm - b.distanceKm);
   }
 
   matchedBanks = [...(matchedBanks || [])].sort((a, b) => {
