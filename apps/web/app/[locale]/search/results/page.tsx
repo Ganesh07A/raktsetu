@@ -73,6 +73,12 @@ export default function SearchResultsPage() {
     let isMounted = true;
     async function loadData() {
       setLoading(true);
+      if (!hasCoordinates) {
+        setBanks([]);
+        setHasCompatibleDonors(false);
+        setLoading(false);
+        return;
+      }
       try {
         const queryParams = new URLSearchParams({
           lat: lat.toString(),
@@ -125,7 +131,7 @@ export default function SearchResultsPage() {
     return () => {
       isMounted = false;
     };
-  }, [bloodGroup, lat, lng, radiusKm, componentType, state, district]);
+  }, [bloodGroup, lat, lng, radiusKm, componentType, state, district, hasCoordinates]);
 
   // Create the request; the API matches donors with active push subscriptions and dispatches FCM.
   const handleBroadcastSubmit = async (e: React.FormEvent) => {
@@ -227,6 +233,14 @@ export default function SearchResultsPage() {
           </Link>
         </Button>
       </div>
+
+      {!hasCoordinates && (
+        <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          {isHi
+            ? 'खोज परिणामों में स्थान निर्देशांक नहीं मिले। कृपया GPS या राज्य/ज़िला चयन से स्थान तय करके दोबारा खोजें।'
+            : 'Search coordinates are missing. Please set a location using GPS or state/district selection before searching.'}
+        </div>
+      )}
 
       {/* Embedded Leaflet Map View */}
       <section className="space-y-2">
