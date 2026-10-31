@@ -1,3 +1,47 @@
+// Firebase background messages share this worker with the existing offline cache worker.
+// Handle notification clicks before loading the Firebase SDK so the custom action routing wins.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const data = event.notification.data || {};
+  const destination = new URL(data.responsePath || '/', self.location.origin);
+  if (event.action === 'accept') destination.searchParams.set('action', 'accepted');
+  if (event.action === 'decline') destination.searchParams.set('action', 'declined');
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of windows) {
+      if ('navigate' in client) await client.navigate(destination.href);
+      await client.focus();
+      return;
+    }
+    await self.clients.openWindow(destination.href);
+  })());
+});
+
+importScripts('/firebase-config.js');
+if (self.__RAKTSETU_FIREBASE_CONFIG__?.apiKey) {
+  importScripts(
+    'https://www.gstatic.com/firebasejs/12.5.0/firebase-app-compat.js',
+    'https://www.gstatic.com/firebasejs/12.5.0/firebase-messaging-compat.js'
+  );
+  firebase.initializeApp(self.__RAKTSETU_FIREBASE_CONFIG__);
+  const messaging = firebase.messaging();
+  messaging.onBackgroundMessage((payload) => {
+    const data = payload.data || {};
+    self.registration.showNotification(data.title || 'RaktSetu', {
+      body: data.body || 'A nearby patient may need your help.',
+      icon: data.icon || '/icons/icon-192x192.png',
+      badge: '/icons/icon-192x192.png',
+      tag: data.tag || `raktsetu-${data.requestId || 'alert'}`,
+      requireInteraction: true,
+      data: { responsePath: data.responsePath || '/' },
+      actions: [
+        { action: 'accept', title: "I'm available" },
+        { action: 'decline', title: 'Not available' },
+      ],
+    });
+  });
+}
+
 // apps/web/public/sw.js
 const STATIC_CACHE = 'raktkhoj-static-v1';
 const RUNTIME_CACHE = 'raktkhoj-runtime-v1';
