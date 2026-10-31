@@ -6,6 +6,7 @@ import { useRouter } from '../src/routing';
 import { Button } from '@repo/ui/button';
 import { Badge } from '@repo/ui/badge';
 import { MapView, type MapMarkerItem } from './map-view';
+import { WaitingRoom } from './waiting-room';
 import {
   ArrowLeft,
   X,
@@ -78,6 +79,10 @@ const CONDITION_TAGS = [
 
 import { type NearbyHospital, getHospitalsForDistrict } from './regional-hospitals';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3002';
+const NOMINATIM_CACHE_PREFIX = 'raktkhoj-geocode-v1:';
+let lastNominatimLookup = 0;
+
 export type WizardStep =
   | 'STEP_1_BLOOD_GROUP'
   | 'STEP_2_LOCATION'
@@ -107,9 +112,11 @@ export function RequestWizard() {
   // Step 2: Location
   const [locationType, setLocationType] = React.useState<'precise' | 'approximate'>('precise');
   const [selectedState, setSelectedState] = React.useState('Maharashtra');
-  const [selectedDistrict, setSelectedDistrict] = React.useState('Mumbai Suburban');
-  const [lat, setLat] = React.useState(19.0760);
-  const [lng, setLng] = React.useState(72.8777);
+  const [selectedDistrict, setSelectedDistrict] = React.useState('');
+  // Coordinates are unresolved until GPS or district geocoding succeeds.
+  const [lat, setLat] = React.useState<number>(20.5937);
+  const [lng, setLng] = React.useState<number>(78.9629);
+  const [isLocationResolved, setIsLocationResolved] = React.useState(false);
   const [isLocating, setIsLocating] = React.useState(false);
   const [locatingStatus, setLocatingStatus] = React.useState('');
   const [isGpsActive, setIsGpsActive] = React.useState(false);
@@ -127,9 +134,14 @@ export function RequestWizard() {
     return getHospitalsForDistrict(selectedState, selectedDistrict, lat, lng);
   }, [selectedState, selectedDistrict, lat, lng]);
 
-  const [selectedHospital, setSelectedHospital] = React.useState<NearbyHospital>(() => {
-    const list = getHospitalsForDistrict('Maharashtra', 'Mumbai Suburban', 19.0760, 72.8777);
-    return list[0]!;
+  const [selectedHospital, setSelectedHospital] = React.useState<NearbyHospital>({
+    id: 'unselected-hospital',
+    name: '',
+    city: '',
+    lat: 20.5937,
+    lng: 78.9629,
+    distanceKm: 0,
+    type: 'Government',
   });
 
   // Auto-update selected hospital when state or district changes
@@ -140,14 +152,16 @@ export function RequestWizard() {
   }, [activeRegionHospitals, isHospitalOptional]);
 
   // Blood Bank Screen
-  const [radiusKm, setRadiusKm] = React.useState<25 | 50 | 100>(100);
+  const [radiusKm, setRadiusKm] = React.useState<25 | 50 | 100>(25);
   const [banksList, setBanksList] = React.useState<any[]>([]);
   const [banksLoading, setBanksLoading] = React.useState(false);
+  const [banksError, setBanksError] = React.useState<string | null>(null);
 
-  // Donors Found Screen
-  const [donorsCount, setDonorsCount] = React.useState(14);
-  const [userPhone, setUserPhone] = React.useState('8177995355');
-  const [isPhoneVerified, setIsPhoneVerified] = React.useState(true);
+  // Donors Found Screen. The count is used only to describe whether matching registrations exist.
+  const [donorsCount, setDonorsCount] = React.useState(0);
+  const [donorLookupLoading, setDonorLookupLoading] = React.useState(false);
+  const [donorLookupError, setDonorLookupError] = React.useState<string | null>(null);
+  const [userPhone, setUserPhone] = React.useState('');
   const [editingPhone, setEditingPhone] = React.useState(false);
 
   // Step 4: Patient Details
@@ -165,20 +179,8 @@ export function RequestWizard() {
 
   // Waiting Room
   const [createdRequestId, setCreatedRequestId] = React.useState<string | null>(null);
-  const [acceptedDonors, setAcceptedDonors] = React.useState<any[]>([
-    {
-      id: 'donor-om',
-      name: 'Om Prakash',
-      bloodGroup: 'AB-',
-      distanceKm: 1.0,
-      gender: 'Male',
-      age: 20,
-      phone: '+919876543210',
-      avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    },
-  ]);
-  const [acceptedCount, setAcceptedCount] = React.useState(1);
-  const [targetCount] = React.useState(3);
+  const [requestCloseToken, setRequestCloseToken] = React.useState<string | null>(null);
+  const [requestError, setRequestError] = React.useState<string | null>(null);
 
   // Audio / Speech Synthesis
   const [isSpeaking, setIsSpeaking] = React.useState(false);
