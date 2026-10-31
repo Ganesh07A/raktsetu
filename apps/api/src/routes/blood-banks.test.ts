@@ -50,7 +50,12 @@ describe('Blood Banks API Routes (/api/v1/blood-banks)', () => {
       expect(res.status).toBe(200);
 
       const json = (await res.json()) as {
-        banks: Array<{ name: string; distanceKm: number; licenseNumber: string }>;
+        banks: Array<{
+          name: string;
+          distanceKm: number;
+          licenseNumber: string;
+          stock: Array<{ unitsAvailable: number }>;
+        }>;
         totalCount: number;
         source: string;
       };
