@@ -160,12 +160,12 @@ export class RequestService {
    */
   public async handleDonorReply(
     requestId: string,
-    donorIdentifier: string,
+    donorId: string,
     action: 'accepted' | 'declined',
     note?: string
   ): Promise<{ success: boolean; duplicate?: boolean; requestStatus: RequestStatus }> {
     if (!this.isLiveDb()) {
-      return mockStore.simulateDonorReply(requestId, donorIdentifier, action, note);
+      return mockStore.simulateDonorReply(requestId, donorId, action, note);
     }
 
     // Live DB Mode
@@ -198,14 +198,14 @@ export class RequestService {
         .where(
           and(
             eq(donorNotifications.requestId, requestId),
-            eq(donorNotifications.donorId, resolvedDonorId)
+            eq(donorNotifications.donorId, donorId)
           )
         )
         .for('update')
         .limit(1);
 
       if (!existingNotif[0]) {
-        throw new Error(`Donor notification not found for request ${requestId} and donor ${resolvedDonorId}`);
+        throw new Error(`Donor notification not found for request ${requestId} and donor ${donorId}`);
       }
 
       const notif = existingNotif[0];
@@ -237,7 +237,7 @@ export class RequestService {
         .where(
           and(
             eq(donorNotifications.requestId, requestId),
-            eq(donorNotifications.donorId, resolvedDonorId)
+            eq(donorNotifications.donorId, donorId)
           )
         )
         .returning();
@@ -279,7 +279,7 @@ export class RequestService {
               and(
                 eq(donorNotifications.requestId, requestId),
                 eq(donorNotifications.status, 'accepted'),
-                ne(donorNotifications.donorId, resolvedDonorId)
+                ne(donorNotifications.donorId, donorId)
               )
             );
 
@@ -307,7 +307,7 @@ export class RequestService {
 
       // Keep mockStore in sync for fallback
       try {
-        mockStore.simulateDonorReply(requestId, resolvedDonorId, action, note);
+        mockStore.simulateDonorReply(requestId, donorId, action, note);
       } catch {
         // Ignore mock store sync failure
       }
