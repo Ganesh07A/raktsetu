@@ -488,49 +488,91 @@ export function RequestWizard() {
     setTimeout(() => goToStep('SCREEN_BLOOD_BANKS'), 900);
   };
 
-  // Dispatches Request to Donors via API
+  const handleFindDonors = async () => {
+    if (!isLocationResolved) {
+      setDonorLookupError(isHi ? 'पहले अपना स्थान तय करें।' : 'Resolve your location before searching for donors.');
+      return;
+    }
+
+    setDonorLookupLoading(true);
+    setDonorLookupError(null);
+    try {
+      const query = new URLSearchParams({
+        bloodGroup: selectedBloodGroup || 'AB+',
+        lat: lat.toString(),
+        lng: lng.toString(),
+        radiusKm: radiusKm.toString(),
+      });
+      const response = await fetch(`${API_BASE}/api/v1/donors/compatible?${query.toString()}`, {
+        cache: 'no-store',
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Donor search failed.');
+      setDonorsCount(Array.isArray(data.donors) ? data.donors.length : Number(data.count || 0));
+      goToStep('SCREEN_DONORS_FOUND');
+    } catch (error) {
+      setDonorLookupError(error instanceof Error ? error.message : 'Unable to search donors.');
+    } finally {
+      setDonorLookupLoading(false);
+    }
+  };
+
+  // Dispatch an actual blood request. The API determines matching subscribed donors and sends FCM.
   const handleSendRequest = async () => {
-    goToStep('SCREEN_SENDING');
+    setRequestError(null);
+    if (!patientName.trim()) {
+      setRequestError(isHi ? 'कृपया मरीज़ का नाम दर्ज करें।' : 'Enter the patient name before sending the request.');
+      return;
+    }
+    if (!selectedHospital.name.trim()) {
+      setRequestError(isHi ? 'अस्पताल चुनें या घर/ट्रांज़िट विकल्प चुनें।' : 'Select a hospital or choose the home/in-transit option.');
+      return;
+    }
+    if (!isLocationResolved) {
+      setRequestError(isHi ? 'अनुरोध भेजने से पहले स्थान तय करें।' : 'Resolve the location before sending the request.');
+      return;
+    }
+
     setIsSending(true);
+    goToStep('SCREEN_SENDING');
 
     try {
       const payload = {
         bloodGroupNeeded: selectedBloodGroup || 'AB+',
         componentType: selectedComponent,
         unitsNeeded: Number(unitsNeeded) || 1,
-        patientName: patientName.trim() || (isHi ? 'साहिब सिंह' : 'Sahib Singh'),
-        patientAge: patientAge ? parseInt(patientAge, 10) : 34,
-        emergencyType: patientCondition || 'Critical',
+        patientName: patientName.trim(),
+        ...(patientAge ? { patientAge: parseInt(patientAge, 10) } : {}),
+        emergencyType: 'other',
         hospitalName: selectedHospital.name,
         latitude: lat,
         longitude: lng,
         state: selectedState,
         district: selectedDistrict,
         searchRadiusKm: radiusKm,
-        requesterPhone: userPhone || '+918177995355',
-        requesterName: 'Family Member',
       };
 
-      const res = await fetch('http://localhost:3002/api/v1/requests', {
+      const response = await fetch(`${API_BASE}/api/v1/requests`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to create emergency request.');
 
-      if (res.ok) {
-        const data = await res.json();
-        setCreatedRequestId(data.requestId || `req-${Date.now()}`);
-      } else {
-        setCreatedRequestId(`req-${Date.now()}`);
+      const requestId = data.request?.id;
+      if (typeof requestId !== 'string' || !requestId) {
+        throw new Error('The API did not return a valid request ID.');
       }
-    } catch {
-      setCreatedRequestId(`req-${Date.now()}`);
+
+      setCreatedRequestId(requestId);
+      setRequestCloseToken(typeof data.requestCloseToken === 'string' ? data.requestCloseToken : null);
+      setTimeout(() => goToStep('SCREEN_WAITING_ROOM'), 700);
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : 'Unable to send emergency request.');
+      goToStep('STEP_6_SEND_REQUEST');
     } finally {
       setIsSending(false);
-      // Seamlessly transition from paper airplane to waiting room
-      setTimeout(() => {
-        goToStep('SCREEN_WAITING_ROOM');
-      }, 1800);
     }
   };
 
@@ -1813,116 +1855,17 @@ export function RequestWizard() {
         {/* REQUEST SENT / WAITING ROOM (Matching Reference Screen 13) */}
         {/* ========================================================================= */}
         {currentStep === 'SCREEN_WAITING_ROOM' && (
-          <div className="flex-1 flex flex-col">
-            {/* Top Accepted Count Pill over Mini Map Banner */}
-            <div className="relative bg-slate-100 h-24 flex items-center justify-center border-b border-slate-200/80">
-              <div className="px-5 py-2 rounded-full bg-white shadow-md border border-slate-200 text-sm font-bold text-slate-900">
-                {isHi
-                  ? `${acceptedCount} / ${targetCount} ने स्वीकार किया`
-                  : `${acceptedCount} of ${targetCount} accepted`}
+          <div className="flex-1 p-4">
+            {createdRequestId ? (
+              <WaitingRoom
+                requestId={createdRequestId}
+                requestCloseToken={requestCloseToken}
+              />
+            ) : (
+              <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-5 text-center text-sm text-red-800">
+                {isHi ? 'अनुरोध आईडी प्राप्त नहीं हुई। कृपया दोबारा प्रयास करें।' : 'No request was created. Please return and try again.'}
               </div>
-            </div>
-
-            {/* Donors who have accepted section */}
-            <div className="p-5 flex-1 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-                    {isHi ? 'जिन्होंने स्वीकार किया है' : "Donors who've accepted"}
-                  </h2>
-                  <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-bold">
-                    {acceptedCount}/{targetCount}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {selectedBloodGroup || 'AB+'} and compatible types
-                </p>
-
-                {/* Accepted Donors Cards */}
-                <div className="mt-5 space-y-3">
-                  {acceptedDonors.map((donor) => (
-                    <div
-                      key={donor.id}
-                      className="p-4 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3"
-                    >
-                      <div className="flex items-center gap-3">
-                        {/* Avatar with Verified Badge Overlay */}
-                        <div className="relative">
-                          <img
-                            src={donor.avatarUrl}
-                            alt={donor.name}
-                            className="w-12 h-12 rounded-full object-cover border border-slate-200"
-                          />
-                          <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-slate-900 border-2 border-white flex items-center justify-center text-white">
-                            <Check className="w-3 h-3 stroke-[3]" />
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-base font-bold text-slate-900">
-                              {donor.name}
-                            </span>
-                            <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-bold">
-                              {donor.bloodGroup}
-                            </span>
-                          </div>
-                          <div className="text-xs text-slate-500 mt-0.5">
-                            {donor.distanceKm} km away · {donor.gender}, {donor.age}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Action Buttons: Share, Call, WhatsApp */}
-                      <div className="flex items-center gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => handleShare(donor.name, `Blood Donor (${donor.bloodGroup})`)}
-                          className="w-11 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center text-slate-700 transition-colors shadow-xs"
-                          aria-label="Share"
-                        >
-                          <Share2 className="w-4 h-4" />
-                        </button>
-
-                        <a
-                          href={`tel:${donor.phone}`}
-                          className="flex-1 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center gap-2 text-slate-800 text-sm font-semibold transition-colors shadow-xs"
-                        >
-                          <Phone className="w-4 h-4 text-slate-700" />
-                          <span>{isHi ? 'कॉल करें' : 'Call'}</span>
-                        </a>
-
-                        <a
-                          href={`https://wa.me/${donor.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                            isHi
-                              ? `नमस्ते ${donor.name}, रक्तखोज पर रक्त दान अनुरोध स्वीकार करने के लिए धन्यवाद!`
-                              : `Hello ${donor.name}, thank you for accepting the blood donation request on RaktKhoj!`
-                          )}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex-1 h-11 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white flex items-center justify-center gap-2 text-sm font-bold transition-colors shadow-xs"
-                        >
-                          <MessageCircle className="w-4 h-4 fill-white text-[#25D366]" />
-                          <span>WhatsApp</span>
-                        </a>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Waiting for more pulsing footer */}
-              <div className="mt-8 text-center pb-6">
-                <div className="inline-flex items-center gap-1.5 text-rose-500 mb-2">
-                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-dot-1"></span>
-                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-dot-2"></span>
-                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-dot-3"></span>
-                </div>
-                <div className="text-sm font-medium text-slate-500">
-                  {isHi ? 'और रक्तदाताओं की प्रतीक्षा है, कृपया धैर्य रखें' : 'Waiting for more, please be patient'}
-                </div>
-              </div>
-            </div>
+            )}
           </div>
         )}
 
