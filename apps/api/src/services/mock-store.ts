@@ -44,9 +44,11 @@ export class MockDataStore {
     banks?: BloodBankCardData[];
     donors?: DonorProfile[];
   }): void {
+    const useSeedFixtures = process.env.NODE_ENV === 'test';
+
     if (customState?.banks) {
       this.bloodBanks = JSON.parse(JSON.stringify(customState.banks));
-    } else {
+    } else if (useSeedFixtures) {
       this.bloodBanks = SEED_BLOOD_BANKS.map((b) => ({
         id: b.id,
         name: b.name,
@@ -65,11 +67,14 @@ export class MockDataStore {
         source: b.source,
         lastStockUpdate: b.lastStockUpdate,
       }));
+    } else {
+      // Never expose demonstration blood-bank inventory in local or production searches.
+      this.bloodBanks = [];
     }
 
     if (customState?.donors) {
       this.donors = JSON.parse(JSON.stringify(customState.donors));
-    } else {
+    } else if (useSeedFixtures) {
       this.donors = SEED_DONORS.map((d) => ({
         id: d.id,
         userId: d.userId,
@@ -91,16 +96,21 @@ export class MockDataStore {
         createdAt: d.createdAt,
         updatedAt: d.createdAt,
       }));
+    } else {
+      // Only donors actually registered in this runtime may appear in live searches.
+      this.donors = [];
     }
 
     this.requests.clear();
     this.notifications.clear();
     this.pushSubscriptions.clear();
     this.outboundPush = [];
-    // Seeded demo donors are treated as opted-in sample devices in mock/local mode.
-    {
+    // Fake subscriptions exist only in automated tests. Real devices must explicitly opt in.
+    if (useSeedFixtures) {
       for (const donor of this.donors) {
-        if (donor.id !== 'donor-manish-no-push-subscription') this.addPushSubscription(donor.id, `test-fcm-token-${donor.id}-${'x'.repeat(48)}`);
+        if (donor.id !== 'donor-manish-no-push-subscription') {
+          this.addPushSubscription(donor.id, `test-fcm-token-${donor.id}-${'x'.repeat(48)}`);
+        }
       }
     }
   }
