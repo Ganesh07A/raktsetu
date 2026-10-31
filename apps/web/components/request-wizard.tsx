@@ -314,7 +314,8 @@ export function RequestWizard() {
         );
       } else {
         // GPS is still valid even if the reverse-geocoder cannot identify a district.
-        // Keep the user's current state selection but do not invent a district.
+        // Keep a recognized state, but never substitute a different district.
+        if (normalizedState) setSelectedState(normalizedState);
         setSelectedDistrict('');
         setDetectedLocationName(displayName || (isHi ? 'जीपीएस स्थान' : 'GPS location'));
       }
