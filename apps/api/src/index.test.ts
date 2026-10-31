@@ -5,6 +5,7 @@ import { createDonorResponseToken } from './services/donor-session';
 
 describe('API Server Endpoints', () => {
   beforeEach(() => {
+    process.env.NODE_ENV = 'test';
     mockStore.reset();
   });
 
