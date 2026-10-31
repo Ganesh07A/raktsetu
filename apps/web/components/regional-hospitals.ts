@@ -227,10 +227,7 @@ export function getHospitalsForDistrict(
   // If curated hospitals exist, calculate real Haversine distance from user's coordinates
   if (found && found.length > 0) {
     return found.map((h) => {
-      let dist = 1.5;
-      if (userLat && userLng && h.lat && h.lng) {
-        dist = parseFloat(haversineDistance(userLat, userLng, h.lat, h.lng).toFixed(1));
-      }
+      const dist = parseFloat(haversineDistance(userLat, userLng, h.lat, h.lng).toFixed(1));
       return {
         ...h,
         distanceKm: dist,
