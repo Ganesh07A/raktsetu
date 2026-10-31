@@ -198,10 +198,8 @@ const CURATED_DISTRICT_HOSPITALS: Record<string, Omit<NearbyHospital, 'distanceK
 };
 
 /**
- * Returns hospitals for ANY state and district in India.
- * If curated hospitals exist for the district, returns them with precise distances.
- * If not in curated list, generates authentic, district-specific healthcare facilities
- * so users NEVER see hospitals from a different city or Mumbai!
+ * Returns only curated facilities for supported districts.
+ * Unknown districts return an empty list rather than fabricated hospitals or coordinates.
  */
 export function getHospitalsForDistrict(
   stateName: string,
@@ -240,56 +238,7 @@ export function getHospitalsForDistrict(
     }).sort((a, b) => a.distanceKm - b.distanceKm);
   }
 
-  // Generate authentic, high-fidelity facilities tailored to THIS exact district
-  const baseLat = userLat || 20.5937;
-  const baseLng = userLng || 78.9629;
-
-  return [
-    {
-      id: `hosp-${cleanDistrict.toLowerCase()}-civil`,
-      name: `${cleanDistrict} District Civil Hospital`,
-      distanceKm: 2.1,
-      city: `${cleanDistrict}, ${cleanState}`,
-      lat: baseLat + 0.012,
-      lng: baseLng + 0.008,
-      type: 'Government',
-    },
-    {
-      id: `hosp-${cleanDistrict.toLowerCase()}-gmch`,
-      name: `${cleanDistrict} Government Medical College & Hospital`,
-      distanceKm: 3.8,
-      city: `${cleanDistrict}, ${cleanState}`,
-      lat: baseLat - 0.018,
-      lng: baseLng + 0.015,
-      type: 'Government',
-    },
-    {
-      id: `hosp-${cleanDistrict.toLowerCase()}-redcross`,
-      name: `Red Cross Regional Blood Centre & Hospital`,
-      distanceKm: 4.5,
-      city: `${cleanDistrict}, ${cleanState}`,
-      lat: baseLat + 0.025,
-      lng: baseLng - 0.011,
-      type: 'Charitable/Vol',
-    },
-    {
-      id: `hosp-${cleanDistrict.toLowerCase()}-lifeline`,
-      name: `Lifeline Super Speciality Hospital & Trauma Centre`,
-      distanceKm: 5.7,
-      city: `${cleanDistrict}, ${cleanState}`,
-      lat: baseLat - 0.031,
-      lng: baseLng - 0.022,
-      type: 'Private',
-    },
-    {
-      id: `hosp-${cleanDistrict.toLowerCase()}-citycare`,
-      name: `City Care Multi-Speciality Hospital`,
-      distanceKm: 7.2,
-      city: `${cleanDistrict}, ${cleanState}`,
-      lat: baseLat + 0.042,
-      lng: baseLng + 0.034,
-      type: 'Private',
-    },
-  ];
+  // Do not invent hospitals for districts without a curated directory entry.
+  return [];
 }
 
