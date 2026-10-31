@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach } from 'bun:test';
 import { app } from '../index';
 import { mockStore } from '../services/mock-store';
+import { createDonorResponseToken } from '../services/donor-session';
 
 describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
   beforeEach(() => {
@@ -125,8 +126,8 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
         expect((n as any).donorPhoneMasked).toContain('****');
       }
 
-      // Verify WhatsApp messages were queued
-      const msgs = mockStore.getOutboundWhatsAppMessages();
+      // Verify push messages were queued
+      const msgs = mockStore.getOutboundPushMessages();
       expect(msgs.some((m) => m.requestId === json.request.id)).toBe(true);
     });
   });
@@ -168,11 +169,11 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
       expect(initJson.notifications[0]!.donorPhoneMasked).toContain('****');
 
       // 3. Donor accepts via deep link respond endpoint
-      const respondRes = await app.request(`/api/v1/requests/${reqId}/respond`, {
+      const respondRes = await app.request('/api/v1/push/respond', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          donorId: 'donor-amit-ab-neg',
+          responseToken: createDonorResponseToken(reqId, 'donor-amit-ab-neg'),
           action: 'accepted',
           responseNote: 'On my way to AIIMS, will arrive in 20 minutes',
         }),
@@ -190,7 +191,6 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
           name: string;
           phone: string;
           directCallUrl: string;
-          whatsappUrl: string;
         }>;
       };
 
@@ -202,7 +202,6 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
       expect(donor.donorId).toBe('donor-amit-ab-neg');
       expect(donor.phone).toBe('+919822233344');
       expect(donor.directCallUrl).toBe('tel:+919822233344');
-      expect(donor.whatsappUrl).toContain('https://wa.me/919822233344');
     });
 
     it('donor decline marks notification declined without fulfilling request', async () => {
@@ -224,11 +223,11 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
       const reqId = created.request.id;
 
       // 2. Donor declines
-      const respondRes = await app.request(`/api/v1/requests/${reqId}/respond`, {
+      const respondRes = await app.request('/api/v1/push/respond', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          donorId: 'donor-amit-ab-neg',
+          responseToken: createDonorResponseToken(reqId, 'donor-amit-ab-neg'),
           action: 'declined',
           responseNote: 'Out of town',
         }),

@@ -67,7 +67,7 @@ describe('DonorMatcherService', () => {
       for (const donor of matches) {
         expect(donor.bloodGroup).toBe('O-');
         expect(donor.isAvailable).toBe(true);
-        expect(donor.whatsappConsent).toBe(true);
+        expect(mockStore.hasPushSubscription(donor.id)).toBe(true);
         expect(donor.distanceKm).toBeLessThanOrEqual(10);
       }
     });
@@ -114,7 +114,7 @@ describe('DonorMatcherService', () => {
       expect(unavailable).toBeUndefined();
     });
 
-    it('strictly excludes donors with whatsappConsent === false', async () => {
+    it('strictly excludes donors without an active push subscription', async () => {
       const matches = await matcher.findCompatibleDonors({
         recipientBloodGroup: 'A+',
         latitude: 28.5672,

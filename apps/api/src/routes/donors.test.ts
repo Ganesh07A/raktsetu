@@ -17,7 +17,6 @@ describe('Donor Routes (/api/v1/donors)', () => {
         longitude: 77.21,
         state: 'Delhi',
         district: 'South Delhi',
-        whatsappConsent: true,
         gender: 'male',
         weightKg: 70,
         preferredLanguage: 'hi',
@@ -47,7 +46,7 @@ describe('Donor Routes (/api/v1/donors)', () => {
       expect((stored as any).name).toBe('Karan Johar');
     });
 
-    it('rejects registration without mandatory WhatsApp consent', async () => {
+    it('registers a donor without requiring browser notification permission at sign-up', async () => {
       const payload = {
         name: 'Amitabh Sen',
         phone: '+919899001133',
@@ -56,18 +55,16 @@ describe('Donor Routes (/api/v1/donors)', () => {
         longitude: 77.21,
         state: 'Delhi',
         district: 'South Delhi',
-        whatsappConsent: false, // Refused consent
       };
-
       const res = await app.request('/api/v1/donors/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-
-      expect(res.status).toBe(400);
-      const json = (await res.json()) as { error: string };
-      expect(json.error).toContain('Consent to receive WhatsApp notifications is required');
+      expect(res.status).toBe(201);
+      const json = (await res.json()) as { success: boolean; token: string };
+      expect(json.success).toBe(true);
+      expect(json.token).toBeDefined();
     });
 
     it('rejects registration with invalid Indian phone number', async () => {
@@ -79,7 +76,6 @@ describe('Donor Routes (/api/v1/donors)', () => {
         longitude: 77.21,
         state: 'Delhi',
         district: 'South Delhi',
-        whatsappConsent: true,
       };
 
       const res = await app.request('/api/v1/donors/register', {
@@ -102,7 +98,6 @@ describe('Donor Routes (/api/v1/donors)', () => {
         longitude: 77.21,
         state: 'Delhi',
         district: 'South Delhi',
-        whatsappConsent: true,
       };
 
       const res = await app.request('/api/v1/donors/register', {
@@ -125,7 +120,6 @@ describe('Donor Routes (/api/v1/donors)', () => {
         longitude: 77.21,
         state: 'Delhi',
         district: 'South Delhi',
-        whatsappConsent: true,
       };
 
       const res = await app.request('/api/v1/donors/register', {
@@ -148,7 +142,6 @@ describe('Donor Routes (/api/v1/donors)', () => {
         longitude: 77.21,
         state: 'Delhi',
         district: 'South Delhi',
-        whatsappConsent: true,
       };
 
       const res = await app.request('/api/v1/donors/register', {

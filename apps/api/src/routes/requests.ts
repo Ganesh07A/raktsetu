@@ -212,45 +212,6 @@ requestRoutes.get('/:id', async (c) => {
   });
 });
 
-// POST /api/v1/requests/:id/respond - Direct response endpoint from deep link
-requestRoutes.post('/:id/respond', async (c) => {
-  const { id } = c.req.param();
-  let body: any;
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: 'Invalid JSON body' }, 400);
-  }
-
-  const details = await requestService.getRequestWithDetails(id);
-  if (!details || !details.request) {
-    return c.json({ error: `Request ${id} not found` }, 404);
-  }
-
-  const action = body.status || body.action;
-  if (!action || !['accepted', 'declined', 'accept', 'decline'].includes(action)) {
-    return c.json(
-      { error: "Valid status ('accepted' or 'declined') is required" },
-      400
-    );
-  }
-
-  const normalizedAction =
-    action === 'accepted' || action === 'accept' ? 'accepted' : 'declined';
-  const donorId = body.donorId || body.donorPhone;
-
-  if (donorId) {
-    await requestService.handleDonorReply(
-      id,
-      donorId,
-      normalizedAction,
-      body.responseNote
-    );
-  }
-
-  return c.json({ success: true, status: normalizedAction });
-});
-
 // PATCH /api/v1/requests/:id/status - Update status manually
 requestRoutes.patch('/:id/status', async (c) => {
   const { id } = c.req.param();
