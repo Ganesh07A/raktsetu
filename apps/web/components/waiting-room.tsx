@@ -228,7 +228,6 @@ export function WaitingRoom({ requestId, requestCloseToken, initialData }: Waiti
             className="w-full border-slate-300"
             disabled={closing}
             onClick={handleCloseSearch}
-            className="border-slate-300"
           >
             {closing ? (isHi ? 'खोज बंद हो रही है…' : 'Closing search…') : (isHi ? 'मुझे रक्तदाता मिल गया — खोज बंद करें' : "I've found help — close search")}
           </Button>
