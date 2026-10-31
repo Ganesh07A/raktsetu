@@ -2,6 +2,7 @@ import {
   db,
   bloodRequests,
   donorNotifications,
+  donorPushSubscriptions,
   donorProfiles,
   users,
   eq,
@@ -81,7 +82,7 @@ export class RequestService {
     id: string;
     requestId: string;
     donorId: string;
-    whatsappMessageId?: string | null;
+    pushMessageId?: string | null;
     status: NotificationStatus;
     donorName?: string;
     donorBloodGroup?: BloodGroup;
@@ -109,7 +110,7 @@ export class RequestService {
             id: notif.id,
             requestId: notif.requestId,
             donorId: notif.donorId,
-            whatsappMessageId: notif.whatsappMessageId ?? null,
+            pushMessageId: notif.pushMessageId ?? null,
             status: notif.status,
             sentAt: notif.sentAt ? new Date(notif.sentAt) : new Date(),
           })
@@ -118,6 +119,41 @@ export class RequestService {
         console.warn('[@repo/api] Warning: Failed to persist notification to DB:', err);
       }
     }
+  }
+
+  /** List active web-push tokens registered by a donor. */
+  public async getPushTokensForDonor(donorId: string): Promise<string[]> {
+    if (!this.isLiveDb()) return mockStore.getPushTokensForDonor(donorId);
+    const rows = await db.select({ token: donorPushSubscriptions.fcmToken })
+      .from(donorPushSubscriptions)
+      .where(eq(donorPushSubscriptions.donorId, donorId));
+    return rows.map((row) => row.token);
+  }
+
+  public async updateNotificationDelivery(params: {
+    requestId: string; donorId: string; status: NotificationStatus; pushMessageId?: string | null;
+  }): Promise<void> {
+    if (!this.isLiveDb()) {
+      mockStore.setNotificationDelivery(params.requestId, params.donorId, params.status);
+      return;
+    }
+    await db.update(donorNotifications)
+      .set({ status: params.status, pushMessageId: params.pushMessageId ?? null })
+      .where(and(
+        eq(donorNotifications.requestId, params.requestId),
+        eq(donorNotifications.donorId, params.donorId)
+      ));
+  }
+
+  public async removePushSubscriptionToken(donorId: string, token: string): Promise<void> {
+    if (!this.isLiveDb()) {
+      mockStore.removePushSubscription(donorId, token);
+      return;
+    }
+    await db.delete(donorPushSubscriptions).where(and(
+      eq(donorPushSubscriptions.donorId, donorId),
+      eq(donorPushSubscriptions.fcmToken, token)
+    ));
   }
 
   /**
@@ -314,7 +350,7 @@ export class RequestService {
   }
 
   /**
-   * Handle donor reply (accept or decline) from WhatsApp webhook or direct deep-link
+   * Handle donor reply (accept or decline) from a signed push action or authenticated donor session
    */
   public async handleDonorReply(
     requestId: string,
@@ -487,22 +523,6 @@ export class RequestService {
   }
 
   /**
-   * Update message status from WhatsApp status receipts (delivered, read, failed)
-   */
-  public async handleDeliveryReceipt(wamid: string, status: 'delivered' | 'read' | 'failed'): Promise<void> {
-    if (this.isLiveDb()) {
-      try {
-        await db
-          .update(donorNotifications)
-          .set({ status })
-          .where(eq(donorNotifications.whatsappMessageId, wamid));
-      } catch (err) {
-        console.warn('[@repo/api] Warning: Failed to update delivery receipt in DB:', err);
-      }
-    }
-  }
-
-  /**
    * Fetch blood request and accepted donor contacts
    */
   public async getRequestWithDetails(id: string): Promise<{
@@ -600,9 +620,6 @@ export class RequestService {
                 distanceKm: dist,
                 respondedAt: n.respondedAt ? n.respondedAt.toISOString() : new Date().toISOString(),
                 directCallUrl: `tel:${donorPhone}`,
-                whatsappUrl: `https://wa.me/${donorPhone.replace('+', '')}?text=${encodeURIComponent(
-                  `Namaste ${donorName}, thank you for accepting blood request for ${request.patientName} at ${request.hospitalName}.`
-                )}`,
               });
             }
           }
@@ -639,9 +656,6 @@ export class RequestService {
               distanceKm: dist,
               respondedAt: n.respondedAt || new Date().toISOString(),
               directCallUrl: `tel:${donorPhone}`,
-              whatsappUrl: `https://wa.me/${donorPhone.replace('+', '')}?text=${encodeURIComponent(
-                `Namaste ${donorName}, thank you for accepting blood request for ${request.patientName} at ${request.hospitalName}.`
-              )}`,
             });
           }
         }

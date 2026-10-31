@@ -16,16 +16,13 @@ import {
 } from '@repo/db';
 import { haversineDistance } from '@repo/shared';
 
-export interface OutboundWhatsAppMessage {
+export interface OutboundPushMessage {
   id: string;
-  recipientPhone: string;
-  templateName: string;
-  language: string;
-  parameters: Record<string, string>;
-  interactiveButtons: Array<{ id: string; title: string }>;
+  requestId: string;
+  title: string;
+  body: string;
+  recipientCount: number;
   timestamp: string;
-  requestId?: string;
-  donorId?: string;
 }
 
 export class MockDataStore {
@@ -33,7 +30,8 @@ export class MockDataStore {
   private donors: DonorProfile[] = [];
   private requests: Map<string, BloodRequest> = new Map();
   private notifications: Map<string, DonorNotificationSummary[]> = new Map();
-  private outboundWhatsApp: OutboundWhatsAppMessage[] = [];
+  private pushSubscriptions = new Map<string, Set<string>>();
+  private outboundPush: OutboundPushMessage[] = [];
 
   constructor() {
     this.reset();
@@ -98,7 +96,13 @@ export class MockDataStore {
 
     this.requests.clear();
     this.notifications.clear();
-    this.outboundWhatsApp = [];
+    this.pushSubscriptions.clear();
+    this.outboundPush = [];
+    if (process.env.NODE_ENV === 'test') {
+      for (const donor of this.donors) {
+        if (donor.id !== 'donor-manish-no-consent') this.addPushSubscription(donor.id, `test-fcm-token-${donor.id}-${'x'.repeat(48)}`);
+      }
+    }
   }
 
   // Blood Banks
@@ -206,17 +210,39 @@ export class MockDataStore {
     return true;
   }
 
-  // Outbound WhatsApp Messages
-  public recordOutboundWhatsApp(message: OutboundWhatsAppMessage): void {
-    this.outboundWhatsApp.push(message);
+  // Device-scoped web push subscriptions.
+  public addPushSubscription(donorId: string, token: string): void {
+    const tokens = this.pushSubscriptions.get(donorId) || new Set<string>();
+    tokens.add(token);
+    this.pushSubscriptions.set(donorId, tokens);
   }
-
-  public getOutboundWhatsAppMessages(): OutboundWhatsAppMessage[] {
-    return [...this.outboundWhatsApp];
+  public getPushTokensForDonor(donorId: string): string[] {
+    return [...(this.pushSubscriptions.get(donorId) || new Set<string>())];
   }
-
-  public clearOutboundWhatsAppMessages(): void {
-    this.outboundWhatsApp = [];
+  public hasPushSubscription(donorId: string): boolean {
+    return (this.pushSubscriptions.get(donorId)?.size || 0) > 0;
+  }
+  public removePushSubscription(donorId: string, token: string): void {
+    const tokens = this.pushSubscriptions.get(donorId);
+    if (!tokens) return;
+    tokens.delete(token);
+    if (tokens.size === 0) this.pushSubscriptions.delete(donorId);
+  }
+  public removePushSubscriptionToken(token: string): void {
+    for (const [donorId, tokens] of this.pushSubscriptions) {
+      tokens.delete(token);
+      if (tokens.size === 0) this.pushSubscriptions.delete(donorId);
+    }
+  }
+  public recordOutboundPush(message: OutboundPushMessage): void {
+    this.outboundPush.push(message);
+  }
+  public getOutboundPushMessages(): OutboundPushMessage[] {
+    return [...this.outboundPush];
+  }
+  public setNotificationDelivery(requestId: string, donorId: string, status: NotificationStatus): void {
+    const notification = this.getNotificationForDonorAndRequest(requestId, donorId);
+    if (notification) notification.status = status;
   }
 
   /**
