@@ -27,7 +27,6 @@ import {
   Info,
 } from 'lucide-react';
 import {
-  getCompatibleDonorGroups,
   type BloodGroup,
   type BloodBankCardData,
   type RadiusPreset,
@@ -196,8 +195,6 @@ export default function SearchResultsPage() {
       stock: bank.stock,
     }];
   }), [banks]);
-
-  const compatibleGroups = getCompatibleDonorGroups(bloodGroup);
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto">
