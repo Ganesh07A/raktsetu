@@ -319,6 +319,37 @@ export class RequestService {
     });
   }
 
+  /** Close a seeker-owned search without overriding an already fulfilled request. */
+  public async closeRequest(requestId: string): Promise<boolean> {
+    if (!this.isLiveDb()) {
+      const existing = mockStore.getRequest(requestId);
+      if (!existing || ['fulfilled', 'cancelled', 'expired'].includes(existing.status)) return false;
+      return mockStore.updateRequest(requestId, {
+        status: 'cancelled',
+        fulfillmentSource: null,
+      });
+    }
+
+    const updated = await db.update(bloodRequests)
+      .set({ status: 'cancelled', fulfillmentSource: null })
+      .where(and(
+        eq(bloodRequests.id, requestId),
+        ne(bloodRequests.status, 'fulfilled'),
+        ne(bloodRequests.status, 'cancelled'),
+        ne(bloodRequests.status, 'expired')
+      ))
+      .returning({ id: bloodRequests.id });
+
+    if (updated.length > 0) {
+      mockStore.updateRequest(requestId, {
+        status: 'cancelled',
+        fulfillmentSource: null,
+      });
+      return true;
+    }
+    return false;
+  }
+
   /**
    * Fetch blood request and accepted donor contacts
    */
