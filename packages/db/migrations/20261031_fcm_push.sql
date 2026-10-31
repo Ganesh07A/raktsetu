@@ -11,15 +11,15 @@ BEGIN
   ) THEN
     ALTER TABLE donor_notifications RENAME COLUMN whatsapp_message_id TO push_message_id;
   END IF;
-END $;
+END $$;
 
-DO $
+DO $$
 BEGIN
   IF to_regclass('public.notifications_whatsapp_id_idx') IS NOT NULL
      AND to_regclass('public.notifications_push_id_idx') IS NULL THEN
     ALTER INDEX notifications_whatsapp_id_idx RENAME TO notifications_push_id_idx;
   END IF;
-END $;
+END $$;
 
 ALTER TABLE donor_profiles DROP COLUMN IF EXISTS whatsapp_consent;
 
