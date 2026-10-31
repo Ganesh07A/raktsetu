@@ -1,7 +1,6 @@
 import {
   getCompatibleDonorGroups,
   haversineDistance,
-  getBoundingBox,
   DONATION_INTERVAL_DAYS,
   type BloodGroup,
   type Gender,

@@ -1,6 +1,6 @@
 'use client';
 
-import { getApp, getApps, initializeApp } from 'firebase/app';
+import { getApps, initializeApp } from 'firebase/app';
 import { deleteToken, getMessaging, getToken, isSupported, onMessage, type MessagePayload } from 'firebase/messaging';
 
 const firebaseConfig = {

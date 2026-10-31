@@ -1,11 +1,9 @@
 import { Hono } from 'hono';
 import {
   BLOOD_GROUPS,
-  donorRegistrationSchema,
   phoneSchema,
   type BloodGroup,
   type DonorProfile,
-  type SupportedLanguage,
 } from '@repo/shared';
 import { db, users, donorProfiles, eq, or } from '@repo/db';
 import { mockStore } from '../services/mock-store';

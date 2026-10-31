@@ -17,29 +17,34 @@ self.addEventListener('notificationclick', (event) => {
   })());
 });
 
-importScripts('/firebase-config.js');
-if (self.__RAKTSETU_FIREBASE_CONFIG__?.apiKey) {
-  importScripts(
-    'https://www.gstatic.com/firebasejs/13.1.0/firebase-app-compat.js',
-    'https://www.gstatic.com/firebasejs/13.1.0/firebase-messaging-compat.js'
-  );
-  firebase.initializeApp(self.__RAKTSETU_FIREBASE_CONFIG__);
-  const messaging = firebase.messaging();
-  messaging.onBackgroundMessage((payload) => {
-    const data = payload.data || {};
-    self.registration.showNotification(data.title || 'RaktSetu', {
-      body: data.body || 'A nearby patient may need your help.',
-      icon: data.icon || '/icons/icon-192x192.png',
-      badge: '/icons/icon-192x192.png',
-      tag: data.tag || `raktsetu-${data.requestId || 'alert'}`,
-      requireInteraction: true,
-      data: { responsePath: data.responsePath || '/' },
-      actions: [
-        { action: 'accept', title: "I'm available" },
-        { action: 'decline', title: 'Not available' },
-      ],
+try {
+  importScripts('/firebase-config.js');
+  if (self.__RAKTSETU_FIREBASE_CONFIG__?.apiKey) {
+    importScripts(
+      'https://www.gstatic.com/firebasejs/13.1.0/firebase-app-compat.js',
+      'https://www.gstatic.com/firebasejs/13.1.0/firebase-messaging-compat.js'
+    );
+    firebase.initializeApp(self.__RAKTSETU_FIREBASE_CONFIG__);
+    const messaging = firebase.messaging();
+    messaging.onBackgroundMessage((payload) => {
+      const data = payload.data || {};
+      self.registration.showNotification(data.title || 'RaktSetu', {
+        body: data.body || 'A nearby patient may need your help.',
+        icon: data.icon || '/icons/icon-192x192.png',
+        badge: '/icons/icon-192x192.png',
+        tag: data.tag || `raktsetu-${data.requestId || 'alert'}`,
+        requireInteraction: true,
+        data: { responsePath: data.responsePath || '/' },
+        actions: [
+          { action: 'accept', title: "I'm available" },
+          { action: 'decline', title: 'Not available' },
+        ],
+      });
     });
-  });
+  }
+} catch (error) {
+  // FCM is optional for the offline app shell; never fail SW installation because of it.
+  console.warn('[SW] Firebase messaging could not be initialized:', error);
 }
 
 // apps/web/public/sw.js
