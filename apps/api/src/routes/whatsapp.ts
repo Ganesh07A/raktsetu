@@ -1,1 +1,0 @@
-export { whatsappWebhookRoutes, whatsappWebhookRoutes as whatsappRoutes } from './whatsapp-webhook';
