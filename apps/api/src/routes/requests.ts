@@ -1,14 +1,11 @@
 import { Hono } from 'hono';
 import {
   BLOOD_GROUPS,
-  haversineDistance,
   type BloodGroup,
   type ComponentType,
   type EmergencyType,
   type RadiusPreset,
   type BloodRequest,
-  type DonorNotificationSummary,
-  type AcceptedDonorContact,
 } from '@repo/shared';
 import { mockStore } from '../services/mock-store';
 import { donorMatcher } from '../services/donor-matcher';
