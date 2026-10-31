@@ -1,3 +1,4 @@
+/* global firebase */
 // Firebase background messages share this worker with the existing offline cache worker.
 // Handle notification clicks before loading the Firebase SDK so the custom action routing wins.
 self.addEventListener('notificationclick', (event) => {
