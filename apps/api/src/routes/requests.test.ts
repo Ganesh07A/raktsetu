@@ -141,7 +141,7 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
       expect(res.status).toBe(404);
     });
 
-    it('returns waiting room details with masked contacts when pending and unmasked when accepted', async () => {
+    it('keeps pending donor details private and unlocks contacts only after acceptance', async () => {
       // 1. Create cascading request
       const createRes = await app.request('/api/v1/requests', {
         method: 'POST',
