@@ -34,6 +34,8 @@ import {
   type ComponentType,
 } from '@repo/shared';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3002';
+
 export default function SearchResultsPage() {
   const locale = useLocale();
   const isHi = locale === 'hi';
@@ -101,7 +103,7 @@ export default function SearchResultsPage() {
         if (district) queryParams.set('district', district);
 
         // Fetch blood banks
-        const bankRes = await fetch(`http://localhost:3002/api/v1/blood-banks/search?${queryParams.toString()}`);
+        const bankRes = await fetch(`${API_BASE}/api/v1/blood-banks/search?${queryParams.toString()}`);
         let foundBanks: BloodBankCardData[] = [];
         if (bankRes.ok) {
           const bankData = await bankRes.json();
@@ -134,7 +136,7 @@ export default function SearchResultsPage() {
 
         // Always query compatible donors for potential fallback
         const donorRes = await fetch(
-          `http://localhost:3002/api/v1/donors/compatible?bloodGroup=${encodeURIComponent(bloodGroup)}&lat=${lat}&lng=${lng}&radiusKm=${radiusKm}`
+          `${API_BASE}/api/v1/donors/compatible?bloodGroup=${encodeURIComponent(bloodGroup)}&lat=${lat}&lng=${lng}&radiusKm=${radiusKm}`
         );
         if (donorRes.ok) {
           const donorData = await donorRes.json();
@@ -180,7 +182,7 @@ export default function SearchResultsPage() {
     setBroadcastError(null);
 
     try {
-      const res = await fetch('http://localhost:3002/api/v1/requests', {
+      const res = await fetch(`${API_BASE}/api/v1/requests`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

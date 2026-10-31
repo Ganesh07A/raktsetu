@@ -10,6 +10,7 @@
   },
   "scripts": {
     "seed": "bun run src/seed.ts",
+    "clean": "bun run src/clean.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
