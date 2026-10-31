@@ -198,8 +198,10 @@ export class ERaktKoshProxyService {
       }
     }
 
-    // Augment / fallback with local database and seed blood banks
-    const fallbackBanks = this.queryLocalSeedBanks(params);
+    // Seed blood banks are fixtures for automated tests only. Never expose them to live users.
+    const fallbackBanks = process.env.NODE_ENV === 'test'
+      ? this.queryLocalSeedBanks(params)
+      : [];
     let finalBanks: BloodBankCardData[];
     let source: 'eraktkosh' | 'database' | 'combined';
 
@@ -218,10 +220,17 @@ export class ERaktKoshProxyService {
       source = 'database';
     }
 
-    // Sort by distance if GPS coordinates are provided
-    if (params.lat !== undefined && params.lng !== undefined) {
-      finalBanks.sort((a, b) => a.distanceKm - b.distanceKm);
-    }
+    // Prioritize records with the requested stock, then sort by measured distance.
+    // Unknown distances are always placed after records with real coordinates.
+    finalBanks.sort((a, b) => {
+      const aHasStock = a.stock.some((item) => item.unitsAvailable > 0);
+      const bHasStock = b.stock.some((item) => item.unitsAvailable > 0);
+      if (aHasStock !== bHasStock) return aHasStock ? -1 : 1;
+      if (a.distanceKm === null && b.distanceKm !== null) return 1;
+      if (a.distanceKm !== null && b.distanceKm === null) return -1;
+      if (a.distanceKm === null || b.distanceKm === null) return 0;
+      return a.distanceKm - b.distanceKm;
+    });
 
     // Store in daily cache (24 hours TTL)
     this.cache.set(cacheKey, {
@@ -330,8 +339,8 @@ export class ERaktKoshProxyService {
       const emailMatch = contactInfo.match(/Email:\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i);
       const email = emailMatch ? emailMatch[1]!.trim() : null;
 
-      // Parse stock counts
-      const stockItems: StockItem[] = [];
+      // Parse only stock quantities actually present in the upstream response.
+      const parsedStock: StockItem[] = [];
       const isAvailable = stockHtml.includes('Available') && !stockHtml.includes('Not Available');
 
       if (isAvailable) {
@@ -341,7 +350,9 @@ export class ERaktKoshProxyService {
         while ((sm = stockRegex.exec(stockHtml)) !== null) {
           const bgRaw = sm[1]!.replace(/Ve/i, '').trim() as BloodGroup;
           const units = parseInt(sm[2]!, 10) || 0;
-          stockItems.push({
+          if (units <= 0) continue;
+          if (params.bloodGroup && bgRaw !== params.bloodGroup) continue;
+          parsedStock.push({
             bloodGroup: bgRaw,
             componentType: params.componentType || 'whole_blood',
             unitsAvailable: units,
@@ -350,19 +361,10 @@ export class ERaktKoshProxyService {
         }
       }
 
-      if (stockItems.length === 0 && params.bloodGroup) {
-        stockItems.push({
-          bloodGroup: params.bloodGroup,
-          componentType: params.componentType || 'whole_blood',
-          unitsAvailable: isAvailable ? 5 : 0,
-          lastUpdated: updatedTimestamp,
-        });
-      }
-
-      // Approximate distance if GPS coordinates provided
-      const distanceKm = params.lat !== undefined && params.lng !== undefined
-        ? parseFloat((2.5 + index * 1.8).toFixed(1))
-        : 0;
+      // The upstream row does not provide coordinates or a measured distance.
+      // Do not pretend the bank is at the seeker's location or invent a km value.
+      const stockItems = parsedStock;
+      const distanceKm: number | null = null;
 
       banks.push({
         id: `eraktkosh-${stateName}-${index + 1}`,
@@ -374,8 +376,8 @@ export class ERaktKoshProxyService {
         address: address || null,
         phone,
         email,
-        latitude: params.lat ?? null,
-        longitude: params.lng ?? null,
+        latitude: null,
+        longitude: null,
         distanceKm,
         stock: stockItems,
         isVerified: true,
