@@ -5,6 +5,7 @@ import { createDonorResponseToken } from '../services/donor-session';
 
 describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
   beforeEach(() => {
+    process.env.NODE_ENV = 'test';
     mockStore.reset();
   });
 
@@ -162,11 +163,16 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
       const initJson = (await initRes.json()) as {
         request: { status: string };
         acceptedDonors: unknown[];
-        notifications: Array<{ donorPhoneMasked?: string }>;
+        notifications: Array<{ id: string; status: string; donorId?: string; donorPhoneMasked?: string; donorName?: string }>;
       };
       expect(initJson.request.status).toBe('donors_notified');
       expect(initJson.acceptedDonors.length).toBe(0);
-      expect(initJson.notifications[0]!.donorPhoneMasked).toContain('****');
+      expect(initJson.notifications.length).toBeGreaterThan(0);
+      expect(initJson.notifications[0]!.status).toBe('sent');
+      // Pending donor identity and contact details must remain private.
+      expect(initJson.notifications[0]!.donorId).toBeUndefined();
+      expect(initJson.notifications[0]!.donorPhoneMasked).toBeUndefined();
+      expect(initJson.notifications[0]!.donorName).toBeUndefined();
 
       // 3. Donor accepts via deep link respond endpoint
       const respondRes = await app.request('/api/v1/push/respond', {
@@ -180,7 +186,7 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
       });
       expect(respondRes.status).toBe(200);
 
-      // 4. Waiting room unlocks unmasked contact details and tel/wa links
+      // 4. Waiting room unlocks unmasked contact details after acceptance
       const acceptedRes = await app.request(`/api/v1/requests/${reqId}`);
       expect(acceptedRes.status).toBe(200);
 
@@ -238,12 +244,12 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
       const getRes = await app.request(`/api/v1/requests/${reqId}`);
       const getJson = (await getRes.json()) as {
         request: { status: string };
-        notifications: Array<{ donorId: string; status: string }>;
+        notifications: Array<{ id: string; status: string }>;
       };
 
       expect(getJson.request.status).toBe('donors_notified');
-      const declinedNotif = getJson.notifications.find((n) => n.donorId === 'donor-amit-ab-neg');
-      expect(declinedNotif?.status).toBe('declined');
+      expect(getJson.notifications).toHaveLength(1);
+      expect(getJson.notifications[0]!.status).toBe('declined');
     });
   });
 });
