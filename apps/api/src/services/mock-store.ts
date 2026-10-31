@@ -16,6 +16,8 @@ import {
 } from '@repo/db';
 import { haversineDistance } from '@repo/shared';
 
+type StoredDonorNotification = DonorNotificationSummary & { requestId: string };
+
 export interface OutboundPushMessage {
   id: string;
   requestId: string;
@@ -29,7 +31,7 @@ export class MockDataStore {
   private bloodBanks: BloodBankCardData[] = [];
   private donors: DonorProfile[] = [];
   private requests: Map<string, BloodRequest> = new Map();
-  private notifications: Map<string, DonorNotificationSummary[]> = new Map();
+  private notifications: Map<string, StoredDonorNotification[]> = new Map();
   private pushSubscriptions = new Map<string, Set<string>>();
   private outboundPush: OutboundPushMessage[] = [];
 
@@ -184,17 +186,17 @@ export class MockDataStore {
   }
 
   // Notifications
-  public addNotification(notif: DonorNotificationSummary & { requestId: string }): void {
+  public addNotification(notif: StoredDonorNotification): void {
     const list = this.notifications.get(notif.requestId) || [];
     list.push(notif);
     this.notifications.set(notif.requestId, list);
   }
 
-  public getNotificationsForRequest(requestId: string): DonorNotificationSummary[] {
+  public getNotificationsForRequest(requestId: string): StoredDonorNotification[] {
     return this.notifications.get(requestId) || [];
   }
 
-  public getNotificationsForDonor(donorId: string): DonorNotificationSummary[] {
+  public getNotificationsForDonor(donorId: string): StoredDonorNotification[] {
     return Array.from(this.notifications.values())
       .flat()
       .filter((notification) => notification.donorId === donorId);
@@ -203,7 +205,7 @@ export class MockDataStore {
   public getNotificationForDonorAndRequest(
     requestId: string,
     donorId: string
-  ): DonorNotificationSummary | undefined {
+  ): StoredDonorNotification | undefined {
     const list = this.notifications.get(requestId);
     return list?.find((n) => n.donorId === donorId);
   }
