@@ -88,7 +88,6 @@ export class MockDataStore {
         lastDonationDate: d.lastDonationDate,
         isAvailable: d.isAvailable,
         searchRadiusKm: d.searchRadiusKm,
-        whatsappConsent: d.whatsappConsent,
         createdAt: d.createdAt,
         updatedAt: d.createdAt,
       }));

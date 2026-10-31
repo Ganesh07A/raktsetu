@@ -112,9 +112,6 @@ export const donorRegistrationSchema = z.object({
     .optional(),
   isAvailable: z.boolean().default(true),
   searchRadiusKm: z.number().default(10),
-  whatsappConsent: z.boolean().refine((val) => val === true, {
-    message: 'Consent to receive WhatsApp notifications is required',
-  }),
   preferredLanguage: z.enum(SUPPORTED_LANGUAGES).default('en'),
 });
 

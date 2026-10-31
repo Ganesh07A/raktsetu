@@ -34,7 +34,6 @@ export const donorProfiles = pgTable(
     lastDonationDate: date('last_donation_date'),
     isAvailable: boolean('is_available').default(true).notNull(),
     searchRadiusKm: integer('search_radius_km').default(10).notNull(),
-    whatsappConsent: boolean('whatsapp_consent').default(false).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -45,8 +44,7 @@ export const donorProfiles = pgTable(
   (table) => [
     index('donor_blood_available_idx').on(
       table.bloodGroup,
-      table.isAvailable,
-      table.whatsappConsent
+      table.isAvailable
     ),
     index('donor_location_idx').on(table.latitude, table.longitude),
     index('donor_state_district_idx').on(table.state, table.district),
