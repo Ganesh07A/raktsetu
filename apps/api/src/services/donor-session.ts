@@ -57,7 +57,7 @@ export function createDonorSessionToken(donorId: string): string {
 
 export function verifyDonorSessionToken(token: string): { donorId: string } | null {
   const payload = verify(token, 'donor-session');
-  return payload ? { donorId: payload.donorId } : null;
+  return payload?.donorId ? { donorId: payload.donorId } : null;
 }
 
 export function createDonorResponseToken(requestId: string, donorId: string): string {
@@ -71,7 +71,9 @@ export function createDonorResponseToken(requestId: string, donorId: string): st
 
 export function verifyDonorResponseToken(token: string): { requestId: string; donorId: string } | null {
   const payload = verify(token, 'donor-response');
-  return payload?.requestId ? { requestId: payload.requestId, donorId: payload.donorId } : null;
+  return payload?.requestId && payload.donorId
+    ? { requestId: payload.requestId, donorId: payload.donorId }
+    : null;
 }
 
 
