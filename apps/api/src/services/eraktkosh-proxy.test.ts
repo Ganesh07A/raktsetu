@@ -62,9 +62,23 @@ describe('ERaktKoshProxyService', () => {
     expect(res.banks.length).toBeGreaterThan(0);
     expect(res.cached).toBe(false);
 
-    // Verify distance sorting: nearest first
+    // Results with matching stock rank first. Within each stock group,
+    // measured distances are ascending and unknown distances sort last.
     for (let i = 0; i < res.banks.length - 1; i++) {
-      expect(res.banks[i]!.distanceKm).toBeLessThanOrEqual(res.banks[i + 1]!.distanceKm);
+      const current = res.banks[i]!;
+      const next = res.banks[i + 1]!;
+      const currentHasStock = current.stock.some((item) => item.unitsAvailable > 0);
+      const nextHasStock = next.stock.some((item) => item.unitsAvailable > 0);
+
+      if (currentHasStock !== nextHasStock) {
+        expect(currentHasStock).toBe(true);
+      } else if (current.distanceKm === null) {
+        expect(next.distanceKm).toBeNull();
+      } else if (next.distanceKm === null) {
+        expect(current.distanceKm).not.toBeNull();
+      } else {
+        expect(current.distanceKm).toBeLessThanOrEqual(next.distanceKm);
+      }
     }
   });
 
