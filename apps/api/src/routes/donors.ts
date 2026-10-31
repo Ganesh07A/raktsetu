@@ -5,10 +5,10 @@ import {
   type BloodGroup,
   type DonorProfile,
 } from '@repo/shared';
-import { db, users, donorProfiles, eq, or } from '@repo/db';
+import { db, users, donorProfiles, donorNotifications, bloodRequests, eq, or, and, desc } from '@repo/db';
 import { mockStore } from '../services/mock-store';
 import { donorMatcher } from '../services/donor-matcher';
-import { createDonorSessionToken } from '../services/donor-session';
+import { createDonorSessionToken, verifyDonorSessionToken } from '../services/donor-session';
 
 export const donorRoutes = new Hono();
 
@@ -247,15 +247,122 @@ donorRoutes.post('/match', async (c) => {
 });
 
 // GET /api/v1/donors/profile/:id
-donorRoutes.get('/profile/:id', (c) => {
+donorRoutes.get('/profile/:id', async (c) => {
   const { id } = c.req.param();
-  const donor = mockStore.getDonorById(id) || mockStore.getDonorByUserId(id);
+  const authorization = c.req.header('Authorization') || '';
+  const sessionToken = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  const session = verifyDonorSessionToken(sessionToken);
 
-  if (!donor) {
-    return c.json({ error: 'Donor profile not found' }, 404);
+  if (!session || session.donorId !== id) {
+    return c.json({ error: 'A valid donor session for this profile is required' }, 401);
   }
 
-  return c.json({ success: true, profile: donor });
+  if (isLiveDb()) {
+    try {
+      const rows = await db
+        .select({
+          id: donorProfiles.id,
+          userId: donorProfiles.userId,
+          bloodGroup: donorProfiles.bloodGroup,
+          latitude: donorProfiles.latitude,
+          longitude: donorProfiles.longitude,
+          state: donorProfiles.state,
+          district: donorProfiles.district,
+          city: donorProfiles.city,
+          dateOfBirth: donorProfiles.dateOfBirth,
+          gender: donorProfiles.gender,
+          weightKg: donorProfiles.weightKg,
+          lastDonationDate: donorProfiles.lastDonationDate,
+          isAvailable: donorProfiles.isAvailable,
+          searchRadiusKm: donorProfiles.searchRadiusKm,
+          createdAt: donorProfiles.createdAt,
+          updatedAt: donorProfiles.updatedAt,
+          name: users.name,
+          phone: users.phone,
+          preferredLanguage: users.preferredLanguage,
+        })
+        .from(donorProfiles)
+        .innerJoin(users, eq(donorProfiles.userId, users.id))
+        .where(eq(donorProfiles.id, id))
+        .limit(1);
+
+      const row = rows[0];
+      if (!row) return c.json({ error: 'Donor profile not found' }, 404);
+
+      const historyRows = await db
+        .select({
+          requestId: bloodRequests.id,
+          patientName: bloodRequests.patientName,
+          hospitalName: bloodRequests.hospitalName,
+          bloodGroupNeeded: bloodRequests.bloodGroupNeeded,
+          unitsNeeded: bloodRequests.unitsNeeded,
+          requestStatus: bloodRequests.status,
+          requestCreatedAt: bloodRequests.createdAt,
+          respondedAt: donorNotifications.respondedAt,
+        })
+        .from(donorNotifications)
+        .innerJoin(bloodRequests, eq(donorNotifications.requestId, bloodRequests.id))
+        .where(and(
+          eq(donorNotifications.donorId, id),
+          eq(donorNotifications.status, 'accepted'),
+          eq(bloodRequests.status, 'fulfilled')
+        ))
+        .orderBy(desc(donorNotifications.respondedAt));
+
+      return c.json({
+        success: true,
+        profile: {
+          ...row,
+          createdAt: row.createdAt.toISOString(),
+          updatedAt: row.updatedAt.toISOString(),
+        },
+        acceptedRequests: historyRows.map((item) => ({
+          ...item,
+          requestCreatedAt: item.requestCreatedAt.toISOString(),
+          respondedAt: item.respondedAt?.toISOString() ?? null,
+        })),
+        // RaktSetu tracks request responses, not medically verified completed donations.
+        confirmedDonationsCount: 0,
+      });
+    } catch (error) {
+      console.error('[@repo/api] Failed to load donor profile from database:', error);
+      return c.json({ error: 'Unable to load donor profile' }, 500);
+    }
+  }
+
+  const donor = mockStore.getDonorById(id);
+  if (!donor) return c.json({ error: 'Donor profile not found' }, 404);
+
+  const acceptedRequests = mockStore.getNotificationsForDonor(id)
+    .filter((notification) => notification.status === 'accepted')
+    .flatMap((notification) => {
+      const request = mockStore.getRequest(notification.requestId);
+      if (!request || request.status !== 'fulfilled') return [];
+      return [{
+        requestId: request.id,
+        patientName: request.patientName,
+        hospitalName: request.hospitalName,
+        bloodGroupNeeded: request.bloodGroupNeeded,
+        unitsNeeded: request.unitsNeeded,
+        requestStatus: request.status,
+        requestCreatedAt: request.createdAt,
+        respondedAt: notification.respondedAt,
+      }];
+    })
+    .sort((a, b) => new Date(b.respondedAt || b.requestCreatedAt).getTime()
+      - new Date(a.respondedAt || a.requestCreatedAt).getTime());
+
+  return c.json({
+    success: true,
+    profile: {
+      ...donor,
+      name: (donor as any).name || null,
+      phone: (donor as any).phone || null,
+      preferredLanguage: (donor as any).preferredLanguage || 'en',
+    },
+    acceptedRequests,
+    confirmedDonationsCount: 0,
+  });
 });
 
 // PATCH /api/v1/donors/profile/:id/availability
