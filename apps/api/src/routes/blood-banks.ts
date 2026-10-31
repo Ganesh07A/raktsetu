@@ -3,7 +3,6 @@ import {
   BLOOD_GROUPS,
   haversineDistance,
   type BloodGroup,
-  type BloodBankCardData,
 } from '@repo/shared';
 import { eraktkoshProxy } from '../services/eraktkosh-proxy';
 import { mockStore } from '../services/mock-store';
