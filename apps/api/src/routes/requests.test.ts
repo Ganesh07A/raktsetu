@@ -250,8 +250,10 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
       };
 
       expect(getJson.request.status).toBe('donors_notified');
-      expect(getJson.notifications).toHaveLength(1);
-      expect(getJson.notifications[0]!.status).toBe('declined');
+      // More than one compatible donor can be notified (AB-, A-, B-, and O-).
+      // The waiting-room API intentionally hides donor identity until acceptance.
+      expect(getJson.notifications.some((notification) => notification.status === 'declined')).toBe(true);
+      expect(getJson.notifications.every((notification) => !('donorId' in notification))).toBe(true);
     });
   });
 });
