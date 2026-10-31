@@ -22,20 +22,59 @@ function getFirebaseApp() {
   return existing || initializeApp(firebaseConfig, 'raktsetu-web');
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        window.clearTimeout(timeout);
+        reject(error);
+      }
+    );
+  });
+}
+
 export async function getWebPushToken(): Promise<string> {
   if (!(await isSupported())) throw new Error('Push notifications are not supported by this browser');
   if (!('serviceWorker' in navigator) || !('Notification' in window)) {
     throw new Error('This browser does not support web notifications');
   }
-  const permission = await Notification.requestPermission();
+
+  const permission = Notification.permission === 'granted'
+    ? 'granted'
+    : await Notification.requestPermission();
   if (permission !== 'granted') throw new Error('Notification permission was not granted');
-  const registration = await navigator.serviceWorker.ready;
+
+  // Register explicitly here as well as in the app layout. This closes the race where
+  // hydration happens after window.load and a load-event listener would never register it.
+  await withTimeout(
+    navigator.serviceWorker.register('/sw.js'),
+    15000,
+    'Service worker registration timed out. Refresh the page and try again.'
+  );
+  const registration = await withTimeout(
+    navigator.serviceWorker.ready,
+    15000,
+    'Service worker did not become active. Refresh the page and try again.'
+  );
+
   const vapidKey = process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY;
   if (!vapidKey) throw new Error('Firebase Web Push certificate (VAPID key) is not configured');
-  return getToken(getMessaging(getFirebaseApp()), {
-    vapidKey,
-    serviceWorkerRegistration: registration,
-  });
+
+  const token = await withTimeout(
+    getToken(getMessaging(getFirebaseApp()), {
+      vapidKey,
+      serviceWorkerRegistration: registration,
+    }),
+    20000,
+    'Firebase did not return a device token. Check the Firebase web config, VAPID public key, and browser console.'
+  );
+  if (!token) throw new Error('Firebase returned an empty device token. Check Firebase Messaging configuration.');
+  return token;
 }
 
 export async function removeWebPushToken(): Promise<void> {
