@@ -335,6 +335,7 @@ export function RequestWizard() {
         const coords = pos.coords;
         setLat(coords.latitude);
         setLng(coords.longitude);
+        setIsLocationResolved(true);
         setGpsAccuracy(
           coords.accuracy && coords.accuracy < 100 ? 'Precise' : 'Approximate'
         );
@@ -372,47 +373,118 @@ export function RequestWizard() {
     );
   };
 
-  // Trigger Radar Scan and fetch Blood Banks with daily cache & real state/district
-  const startRadarSearch = () => {
-    goToStep('SCREEN_RADAR');
-    setBanksLoading(true);
+  const resolveManualLocation = async () => {
+    if (!selectedDistrict) {
+      setLocationError(isHi ? 'कृपया पहले राज्य और ज़िला चुनें।' : 'Select a state and district first.');
+      return;
+    }
 
-    // Call Blood Bank API with state, district, and coordinates
-    const fetchBanks = async () => {
+    setIsLocating(true);
+    setLocationError(null);
+    setLocatingStatus(isHi ? 'चुने गए ज़िले का स्थान खोजा जा रहा है…' : 'Resolving selected district coordinates…');
+    try {
+      const cacheKey = `${NOMINATIM_CACHE_PREFIX}${selectedState.toLowerCase()}:${selectedDistrict.toLowerCase()}`;
+      let resolved: { lat: number; lng: number; displayName: string } | null = null;
+
       try {
-        const query = new URLSearchParams({
-          lat: lat.toString(),
-          lng: lng.toString(),
-          bloodGroup: selectedBloodGroup || 'AB+',
-          radiusKm: radiusKm.toString(),
-          state: selectedState,
-          district: selectedDistrict,
-          componentType: selectedComponent,
-        });
-        const res = await fetch(`http://localhost:3002/api/v1/blood-banks/search?${query.toString()}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.banks && data.banks.length > 0) {
-            setBanksList(data.banks);
-          } else {
-            setBanksList(activeRegionHospitals);
-          }
-        } else {
-          setBanksList(activeRegionHospitals);
-        }
+        const cached = sessionStorage.getItem(cacheKey);
+        if (cached) resolved = JSON.parse(cached) as { lat: number; lng: number; displayName: string };
       } catch {
-        setBanksList(activeRegionHospitals);
-      } finally {
-        setBanksLoading(false);
+        // Ignore stale or malformed local geocoding cache.
       }
-    };
 
-    fetchBanks();
+      if (!resolved) {
+        const waitMs = Math.max(0, 1100 - (Date.now() - lastNominatimLookup));
+        if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+        lastNominatimLookup = Date.now();
 
-    // Auto-transition from radar to blood banks after 1.8 seconds (realistic animation)
-    setTimeout(() => {
-      goToStep('SCREEN_BLOOD_BANKS');
-    }, 1800);
+        const query = new URLSearchParams({
+          q: `${selectedDistrict}, ${selectedState}, India`,
+          format: 'jsonv2',
+          limit: '1',
+          countrycodes: 'in',
+        });
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?${query.toString()}`, {
+          headers: { Accept: 'application/json' },
+          cache: 'no-store',
+        });
+        if (!response.ok) throw new Error('Location lookup service is unavailable.');
+        const results = await response.json() as Array<{ lat?: string; lon?: string; display_name?: string }>;
+        const first = results[0];
+        const nextLat = Number(first?.lat);
+        const nextLng = Number(first?.lon);
+        if (!Number.isFinite(nextLat) || !Number.isFinite(nextLng)) {
+          throw new Error(isHi
+            ? 'इस ज़िले का मानचित्र स्थान नहीं मिला। कृपया GPS का उपयोग करें।'
+            : 'Could not resolve this district on the map. Please use GPS instead.');
+        }
+        resolved = {
+          lat: nextLat,
+          lng: nextLng,
+          displayName: first?.display_name || `${selectedDistrict}, ${selectedState}`,
+        };
+        try { sessionStorage.setItem(cacheKey, JSON.stringify(resolved)); } catch { /* cache is optional */ }
+      }
+
+      setLat(resolved.lat);
+      setLng(resolved.lng);
+      setIsLocationResolved(true);
+      setIsGpsActive(false);
+      setDetectedLocationName(resolved.displayName);
+      const hospitals = getHospitalsForDistrict(selectedState, selectedDistrict, resolved.lat, resolved.lng);
+      if (hospitals.length > 0) setSelectedHospital(hospitals[0]!);
+      goToStep('STEP_3_HOSPITAL');
+    } catch (error) {
+      setLocationError(error instanceof Error ? error.message : 'Unable to resolve selected district.');
+    } finally {
+      setIsLocating(false);
+      setLocatingStatus('');
+    }
+  };
+
+  const fetchBloodBanks = async (searchRadius: 25 | 50 | 100) => {
+    if (!isLocationResolved) {
+      setBanksError(isHi ? 'पहले मानचित्र पर अपना स्थान तय करें।' : 'Resolve your location before searching for blood banks.');
+      return;
+    }
+
+    setBanksLoading(true);
+    setBanksError(null);
+    try {
+      const query = new URLSearchParams({
+        lat: lat.toString(),
+        lng: lng.toString(),
+        bloodGroup: selectedBloodGroup || 'AB+',
+        radiusKm: searchRadius.toString(),
+        state: selectedState,
+        district: selectedDistrict,
+        componentType: selectedComponent,
+      });
+      const response = await fetch(`${API_BASE}/api/v1/blood-banks/search?${query.toString()}`, {
+        cache: 'no-store',
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Blood bank search failed.');
+      setBanksList(Array.isArray(data.banks) ? data.banks : []);
+    } catch (error) {
+      setBanksList([]);
+      setBanksError(error instanceof Error ? error.message : 'Unable to search blood banks.');
+    } finally {
+      setBanksLoading(false);
+    }
+  };
+
+  // Trigger the blood-bank search using only the resolved selected/GPS coordinates.
+  const startRadarSearch = () => {
+    if (!isLocationResolved) {
+      setLocationError(isHi ? 'कृपया GPS या ज़िले का मानचित्र स्थान तय करें।' : 'Please resolve your location using GPS or your selected district first.');
+      setCurrentStep('STEP_2_LOCATION');
+      return;
+    }
+
+    goToStep('SCREEN_RADAR');
+    void fetchBloodBanks(radiusKm);
+    setTimeout(() => goToStep('SCREEN_BLOOD_BANKS'), 900);
   };
 
   // Dispatches Request to Donors via API
@@ -471,34 +543,33 @@ export function RequestWizard() {
     }
   };
 
-  // Blood banks to display (from real eRaktKosh live search or district directory)
-  const displayBanks = banksList && banksList.length > 0 ? banksList : activeRegionHospitals;
+  // Only real blood-bank search results are displayed here. Curated hospitals remain
+  // separate in the hospital-selection step and are never presented as blood banks.
+  const displayBanks = banksList;
 
-  // Map markers for Blood Banks screen centered around user's location & district facilities
   const mapMarkers: MapMarkerItem[] = [
-    {
+    ...(isLocationResolved ? [{
       id: 'user-pin',
       name: isHi ? 'मरीज़ का स्थान' : "Patient's Location",
       latitude: lat,
       longitude: lng,
-      type: 'user',
-    },
-    ...displayBanks.map((h: any, i: number) => ({
-      id: h.id || `bank-${i}`,
-      name: h.name,
-      latitude: h.latitude || h.lat || (lat + 0.008 * (i % 2 === 0 ? 1 : -1) * (i + 1)),
-      longitude: h.longitude || h.lng || (lng + 0.008 * (i % 2 === 0 ? -1 : 1) * (i + 1)),
-      type: 'bank' as const,
-      distanceKm: h.distanceKm || (1.5 + i),
-      isVerified: true,
-      stock: h.stock || [
-        {
-          bloodGroup: selectedBloodGroup || 'AB+',
-          componentType: 'whole_blood',
-          unitsAvailable: i === 0 ? 39 : i === 1 ? 11 : 32,
-        },
-      ],
-    })),
+      type: 'user' as const,
+    }] : []),
+    ...displayBanks.flatMap((bank: any) => {
+      const bankLat = typeof bank.latitude === 'number' ? bank.latitude : null;
+      const bankLng = typeof bank.longitude === 'number' ? bank.longitude : null;
+      if (bankLat === null || bankLng === null) return [];
+      return [{
+        id: bank.id,
+        name: bank.name,
+        latitude: bankLat,
+        longitude: bankLng,
+        type: 'bank' as const,
+        ...(typeof bank.distanceKm === 'number' ? { distanceKm: bank.distanceKm } : {}),
+        isVerified: Boolean(bank.isVerified),
+        stock: Array.isArray(bank.stock) ? bank.stock : [],
+      }];
+    }),
   ];
 
   // Helper text computation
