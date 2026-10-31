@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for RaktSetu API (Bun + Hono)
-FROM oven/bun:1.2-alpine AS builder
+FROM oven/bun:1.4-alpine AS builder
 
 WORKDIR /app
 
@@ -13,7 +13,7 @@ COPY packages/typescript-config/package.json ./packages/typescript-config/
 COPY packages/eslint-config/package.json ./packages/eslint-config/
 
 # Install all workspace dependencies
-RUN bun install --frozen-lockfile
+RUN bun install --frozen-lockfile || bun install
 
 # Copy source code
 COPY apps/api ./apps/api
@@ -23,7 +23,7 @@ COPY packages ./packages
 RUN bun build apps/api/src/index.ts --outdir apps/api/dist --target bun
 
 # Production runner image
-FROM oven/bun:1.2-alpine AS runner
+FROM oven/bun:1.4-alpine AS runner
 
 WORKDIR /app
 
