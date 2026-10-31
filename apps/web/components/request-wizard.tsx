@@ -302,6 +302,7 @@ export function RequestWizard() {
       const matched = matchStateAndDistrict(stateName, districtName);
       setSelectedState(matched.state);
       setSelectedDistrict(matched.district);
+      setIsLocationResolved(true);
 
       const finalDisplay = displayName || `${matched.district}, ${matched.state}`;
       setDetectedLocationName(finalDisplay);
@@ -585,7 +586,7 @@ export function RequestWizard() {
       ? `मुझे तत्काल ${selectedBloodGroup || 'AB+'} रक्त की आवश्यकता है (संगत समूह भी मान्य: ${compatibleList}) — ${unitsNeeded} यूनिट चाहिए। मरीज़ ${selectedHospital.name} में भर्ती है। कृपया जीवन बचाने में सहायता करें।`
       : `I urgently need ${selectedBloodGroup || 'AB+'} blood (compatible groups also accepted: ${compatibleList}) — ${unitsNeeded} units required. Patient is at ${selectedHospital.name}. Please help if you can.`;
 
-  // Filter hospitals in Step 3 dynamically from active regional hospitals
+  // Filter only curated facilities. Unknown districts return no fabricated hospitals.
   const filteredHospitals = activeRegionHospitals.filter((h) =>
     h.name.toLowerCase().includes(hospitalSearch.toLowerCase()) ||
     h.city.toLowerCase().includes(hospitalSearch.toLowerCase())
@@ -870,10 +871,20 @@ export function RequestWizard() {
                     onChange={(e) => {
                       const newState = e.target.value;
                       setSelectedState(newState);
-                      const dists = getDistrictsForState(newState);
-                      setSelectedDistrict(dists[0] || '');
+                      setSelectedDistrict('');
                       setIsGpsActive(false);
+                      setIsLocationResolved(false);
                       setDetectedLocationName(null);
+                      setBanksList([]);
+                      setSelectedHospital({
+                        id: 'unselected-hospital',
+                        name: '',
+                        city: '',
+                        lat,
+                        lng,
+                        distanceKm: 0,
+                        type: 'Government',
+                      });
                     }}
                     className="w-full h-12 px-4 rounded-xl border border-slate-200 bg-white text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 appearance-none bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E')] bg-[length:18px_18px] bg-[right_14px_center] bg-no-repeat"
                   >
@@ -894,6 +905,18 @@ export function RequestWizard() {
                     onChange={(e) => {
                       setSelectedDistrict(e.target.value);
                       setIsGpsActive(false);
+                      setIsLocationResolved(false);
+                      setDetectedLocationName(null);
+                      setBanksList([]);
+                      setSelectedHospital({
+                        id: 'unselected-hospital',
+                        name: '',
+                        city: '',
+                        lat,
+                        lng,
+                        distanceKm: 0,
+                        type: 'Government',
+                      });
                     }}
                     className="w-full h-12 px-4 rounded-xl border border-slate-200 bg-white text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 appearance-none bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E')] bg-[length:18px_18px] bg-[right_14px_center] bg-no-repeat"
                   >
@@ -925,10 +948,13 @@ export function RequestWizard() {
             <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-white/95 backdrop-blur-md border-t border-slate-100 z-30">
               <Button
                 type="button"
-                onClick={() => goToStep('STEP_3_HOSPITAL')}
+                onClick={resolveManualLocation}
+                disabled={isLocating || !selectedDistrict}
                 className="w-full h-12 rounded-xl text-base font-semibold shadow-md bg-rose-500 hover:bg-rose-600 text-white active:scale-[0.99]"
               >
-                {isHi ? 'पुष्टि करें' : 'Confirm'}
+                {isLocating
+                  ? (isHi ? 'स्थान खोजा जा रहा है…' : 'Resolving location…')
+                  : (isHi ? 'स्थान की पुष्टि करें' : 'Confirm location')}
               </Button>
             </div>
 
