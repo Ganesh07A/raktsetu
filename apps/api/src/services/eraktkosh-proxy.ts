@@ -6,12 +6,10 @@ import {
   type ComponentType,
   getEraktkoshStateCode,
   getEraktkoshDistrictCode,
-  ALL_INDIAN_STATES,
 } from '@repo/shared';
 import {
   SEED_BLOOD_BANKS,
   STATES_AND_DISTRICTS,
-  type SeedBloodBank,
 } from '@repo/db';
 
 export interface ERaktKoshSearchParams {
