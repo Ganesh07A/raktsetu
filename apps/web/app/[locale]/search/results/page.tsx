@@ -160,6 +160,12 @@ export default function SearchResultsPage() {
   // Create the request; the API matches donors with active push subscriptions and dispatches FCM.
   const handleBroadcastSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!hasCoordinates) {
+      setBroadcastError(isHi
+        ? 'कृपया पहले GPS या राज्य/ज़िला से स्थान तय करें।'
+        : 'Please resolve a real location before creating an emergency request.');
+      return;
+    }
     if (!patientName.trim()) {
       setBroadcastError(isHi ? 'कृपया रोगी का नाम दर्ज करें' : 'Please enter patient name');
       return;
