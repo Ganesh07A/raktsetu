@@ -2,7 +2,6 @@
 
 import * as React from 'react';
 import { useLocale } from 'next-intl';
-import { Link } from '../src/routing';
 import { Button } from '@repo/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@repo/ui/card';
 import { Badge } from '@repo/ui/badge';
@@ -10,13 +9,9 @@ import {
   Clock,
   CheckCircle2,
   PhoneCall,
-  MessageSquare,
   AlertCircle,
-  Copy,
-  ExternalLink,
   Users,
   ShieldCheck,
-  Send,
   Droplet,
   HeartHandshake,
   Check,
@@ -39,7 +34,6 @@ export interface WaitingRoomProps {
     })[];
     acceptedDonors: (AcceptedDonorContact & {
       directCallUrl?: string;
-      whatsappUrl?: string;
     })[];
   };
 }
@@ -58,8 +52,6 @@ export function WaitingRoom({ requestId, initialData }: WaitingRoomProps) {
     initialData?.acceptedDonors || []
   );
   const [loading, setLoading] = React.useState(!initialData);
-  const [copied, setCopied] = React.useState(false);
-  const [simulating, setSimulating] = React.useState(false);
 
   // Polling engine: Queries GET /api/v1/requests/:id every 3 seconds
   React.useEffect(() => {
@@ -104,50 +96,6 @@ export function WaitingRoom({ requestId, initialData }: WaitingRoomProps) {
 
   const isFulfilled =
     request?.status === 'fulfilled' || acceptedDonors.length > 0;
-
-  // Donor direct respond URL for deep-linking
-  const respondUrl =
-    typeof window !== 'undefined'
-      ? `${window.location.origin}/${locale}/donor/respond/${requestId}`
-      : `/donor/respond/${requestId}`;
-
-  const handleCopyLink = () => {
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      navigator.clipboard.writeText(respondUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  // Instant simulator action for testing acceptance
-  const handleSimulateAccept = async () => {
-    setSimulating(true);
-    try {
-      const firstNotif = notifications[0];
-      await fetch(`http://localhost:3002/api/v1/requests/${requestId}/respond`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: 'accepted',
-          donorId: firstNotif?.donorId,
-          responseNote: 'Ready to donate immediately',
-        }),
-      });
-
-      // Trigger immediate poll
-      const res = await fetch(`http://localhost:3002/api/v1/requests/${requestId}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.request) setRequest(data.request);
-        if (data.notifications) setNotifications(data.notifications);
-        if (data.acceptedDonors) setAcceptedDonors(data.acceptedDonors);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSimulating(false);
-    }
-  };
 
   if (loading && !request) {
     return (
@@ -339,20 +287,6 @@ export function WaitingRoom({ requestId, initialData }: WaitingRoomProps) {
                         <span>{isHi ? 'तुरंत कॉल करें' : 'Call Donor'}</span>
                       </a>
 
-                      <a
-                        href={
-                          donor.whatsappUrl ||
-                          `https://wa.me/${donor.phone.replace('+', '')}?text=${encodeURIComponent(
-                            `Namaste ${donor.name}, thank you for accepting our blood request for ${request?.patientName} at ${request?.hospitalName}.`
-                          )}`
-                        }
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs shadow-sm active:scale-95 transition-all"
-                      >
-                        <MessageSquare className="h-4 w-4" />
-                        <span>{isHi ? 'व्हाट्सएप चैट' : 'WhatsApp'}</span>
-                      </a>
                     </div>
                   </div>
                 ))}
@@ -437,56 +371,6 @@ export function WaitingRoom({ requestId, initialData }: WaitingRoomProps) {
               })}
             </div>
           )}
-        </CardContent>
-      </Card>
-
-      {/* Donor Quick Action & Deep Link Share */}
-      <Card className="border border-slate-200 bg-slate-50/50">
-        <CardContent className="p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <p className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-              <ExternalLink className="h-4 w-4 text-slate-600" />
-              <span>{isHi ? 'दाता प्रतिक्रिया डीप-लिंक' : 'Donor Response Action & Deep-Link'}</span>
-            </p>
-            <p className="text-xs text-slate-600">
-              {isHi
-                ? 'यह वही लिंक है जो व्हाट्सएप पर भेजा गया है। इसे स्वयं खोलकर परीक्षण कर सकते हैं:'
-                : 'Direct action page link received by donors on WhatsApp:'}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleCopyLink}
-              className="text-xs border-slate-300 font-semibold"
-            >
-              <Copy className="h-3.5 w-3.5 mr-1" />
-              <span>{copied ? (isHi ? 'कॉपी हुआ!' : 'Copied!') : (isHi ? 'लिंक कॉपी करें' : 'Copy Link')}</span>
-            </Button>
-
-            <Button asChild size="sm" variant="default" className="text-xs bg-red-600 hover:bg-red-700 text-white font-bold">
-              <Link href={`/donor/respond/${requestId}`}>
-                <span>{isHi ? 'दाता प्रतिक्रिया पृष्ठ खोलें' : 'Open Response Page'}</span>
-              </Link>
-            </Button>
-
-            {/* Test simulator button */}
-            {!isFulfilled && (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                loading={simulating}
-                onClick={handleSimulateAccept}
-                className="text-xs border-emerald-400 text-emerald-800 hover:bg-emerald-50 font-bold"
-              >
-                <span>{isHi ? '⚡ स्वीकृति अनुकरण (टेस्ट मोड)' : '⚡ Simulate Accept'}</span>
-              </Button>
-            )}
-          </div>
         </CardContent>
       </Card>
     </div>
