@@ -4,7 +4,6 @@ import * as React from 'react';
 import { useLocale } from 'next-intl';
 import { useRouter } from '../src/routing';
 import { Button } from '@repo/ui/button';
-import { Badge } from '@repo/ui/badge';
 import { MapView, type MapMarkerItem } from './map-view';
 import { WaitingRoom } from './waiting-room';
 import {
@@ -30,10 +29,7 @@ import {
   Info,
   Building2,
   User,
-  Heart,
-  Droplet,
   AlertCircle,
-  MessageCircle,
 } from 'lucide-react';
 import {
   BLOOD_GROUPS,
@@ -161,8 +157,6 @@ export function RequestWizard() {
   const [donorsCount, setDonorsCount] = React.useState(0);
   const [donorLookupLoading, setDonorLookupLoading] = React.useState(false);
   const [donorLookupError, setDonorLookupError] = React.useState<string | null>(null);
-  const [userPhone, setUserPhone] = React.useState('');
-  const [editingPhone, setEditingPhone] = React.useState(false);
 
   // Step 4: Patient Details
   const [patientName, setPatientName] = React.useState('');
