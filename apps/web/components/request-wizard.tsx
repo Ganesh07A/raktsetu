@@ -1336,7 +1336,10 @@ export function RequestWizard() {
                   <button
                     key={r}
                     type="button"
-                    onClick={() => setRadiusKm(r)}
+                    onClick={() => {
+                      setRadiusKm(r);
+                      void fetchBloodBanks(r);
+                    }}
                     className={`px-5 py-1.5 rounded-full text-sm font-semibold transition-all ${
                       radiusKm === r
                         ? 'bg-rose-500 text-white shadow-sm'
@@ -1358,79 +1361,91 @@ export function RequestWizard() {
 
             {/* Scrollable Blood Banks Cards List */}
             <div className="p-4 space-y-3 pb-28">
-              {displayBanks.map((bank: any, index: number) => {
-                const stockItems = bank.stock || [];
-                const matchingStock = stockItems.find((s: any) => s.bloodGroup === selectedBloodGroup);
-                const units = matchingStock ? matchingStock.unitsAvailable : (index === 0 ? 28 : index === 1 ? 14 : 9);
+              {banksError && <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{banksError}</p>}
+              {banksLoading && <p className="text-center text-sm text-slate-500">{isHi ? 'ब्लड बैंक खोजे जा रहे हैं…' : 'Searching blood banks…'}</p>}
+              {!banksLoading && !banksError && displayBanks.length === 0 && (
+                <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center">
+                  <Building2 className="mx-auto h-8 w-8 text-slate-300" />
+                  <p className="mt-2 text-sm font-semibold text-slate-700">{isHi ? 'इस क्षेत्र में कोई सत्यापित परिणाम नहीं मिला।' : 'No blood bank results were returned for this area.'}</p>
+                  <p className="mt-1 text-xs text-slate-500">{isHi ? 'दायरा बढ़ाकर फिर खोजें या रक्तदाता खोजें।' : 'Try a wider radius or continue to search for registered volunteer donors.'}</p>
+                </div>
+              )}
+              {displayBanks.map((bank: any) => {
+                const matchingStock = (bank.stock || []).filter((item: any) =>
+                  item.bloodGroup === selectedBloodGroup &&
+                  item.componentType === selectedComponent &&
+                  item.unitsAvailable > 0
+                );
+                const units = matchingStock.reduce((sum: number, item: any) => sum + item.unitsAvailable, 0);
+                const measuredDistance = typeof bank.distanceKm === 'number' && Number.isFinite(bank.distanceKm)
+                  ? `${bank.distanceKm.toFixed(1)} km`
+                  : (isHi ? 'दूरी उपलब्ध नहीं' : 'Distance unavailable');
                 const updatedTime = bank.lastStockUpdate
-                  ? bank.lastStockUpdate.includes('T') || bank.lastStockUpdate.includes('-')
-                    ? 'Updated today'
-                    : bank.lastStockUpdate
-                  : (index === 0 ? 'Updated 25m ago' : index === 1 ? 'Updated 1h ago' : 'Updated 3h ago');
-                const destLat = bank.latitude ?? bank.lat ?? lat;
-                const destLng = bank.longitude ?? bank.lng ?? lng;
-                const bankPhone = bank.phone || '+919876543210';
+                  ? new Date(bank.lastStockUpdate).toLocaleString(isHi ? 'hi-IN' : 'en-IN')
+                  : (isHi ? 'अपडेट समय उपलब्ध नहीं' : 'Update time unavailable');
+                const destLat = typeof bank.latitude === 'number' ? bank.latitude : null;
+                const destLng = typeof bank.longitude === 'number' ? bank.longitude : null;
+                const bankPhone = typeof bank.phone === 'string' && bank.phone.trim() ? bank.phone : null;
                 const bankLocation = bank.address || bank.city || `${selectedDistrict}, ${selectedState}`;
 
                 return (
                   <div
-                    key={bank.id || `bank-${index}`}
+                    key={bank.id}
                     className="p-4 rounded-2xl border border-slate-200 bg-white shadow-xs hover:border-slate-300 transition-all space-y-3"
                   >
                     <div>
-                      <h3 className="text-base font-bold text-slate-900 leading-snug">
-                        {bank.name}
-                      </h3>
+                      <h3 className="text-base font-bold text-slate-900 leading-snug">{bank.name}</h3>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        {bankLocation} · <span className="font-semibold text-rose-600">{bank.distanceKm} km</span>
+                        {bankLocation} · <span className="font-semibold text-rose-600">{measuredDistance}</span>
                       </p>
                     </div>
 
-                    {/* Badges & Stock Freshness */}
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-medium">
-                        {bank.type || 'Blood Bank'}
+                        {bank.source || 'Blood Bank'}
                       </span>
                       <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold">
-                        {units} units
+                        {units} {isHi ? 'यूनिट उपलब्ध' : 'units available'}
                       </span>
                       <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-semibold">
-                        {selectedBloodGroup || 'AB+'}
+                        {selectedBloodGroup || 'AB+'} · {selectedComponent}
                       </span>
-                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50/80 px-2 py-0.5 rounded-md">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
                         {updatedTime}
                       </span>
                     </div>
 
-                    {/* Actions Row: Share, Directions, Call */}
                     <div className="flex items-center gap-2 pt-1">
                       <button
                         type="button"
-                        onClick={() => handleShare(bank.name, `${bankLocation} (${bank.distanceKm} km)`)}
+                        onClick={() => handleShare(bank.name, `${bankLocation} · ${measuredDistance}`)}
                         className="w-11 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center text-slate-700 transition-colors shadow-xs"
                         aria-label="Share"
                       >
                         <Share2 className="w-4 h-4" />
                       </button>
 
-                      <a
-                        href={`https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="w-11 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center text-slate-700 transition-colors shadow-xs"
-                        aria-label="Directions"
-                      >
-                        <Navigation className="w-4 h-4" />
-                      </a>
+                      {destLat !== null && destLng !== null && (
+                        <a
+                          href={`https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-11 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center text-slate-700 transition-colors shadow-xs"
+                          aria-label="Directions"
+                        >
+                          <Navigation className="w-4 h-4" />
+                        </a>
+                      )}
 
-                      <a
-                        href={`tel:${bankPhone}`}
-                        className="flex-1 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center gap-2 text-slate-800 text-sm font-semibold transition-colors shadow-xs"
-                      >
-                        <Phone className="w-4 h-4 text-slate-700" />
-                        <span>{isHi ? 'कॉल करें' : 'Call'}</span>
-                      </a>
+                      {bankPhone && (
+                        <a
+                          href={`tel:${bankPhone}`}
+                          className="flex-1 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center gap-2 text-slate-800 text-sm font-semibold transition-colors shadow-xs"
+                        >
+                          <Phone className="w-4 h-4 text-slate-700" />
+                          <span>{isHi ? 'कॉल करें' : 'Call'}</span>
+                        </a>
+                      )}
                     </div>
                   </div>
                 );
