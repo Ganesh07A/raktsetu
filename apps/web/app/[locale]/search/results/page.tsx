@@ -58,6 +58,8 @@ export default function SearchResultsPage() {
   const [loading, setLoading] = React.useState(true);
   const [banks, setBanks] = React.useState<BloodBankCardData[]>([]);
   const hasBankStock = banks.some((bank) =>
+    bank.distanceKm !== null &&
+    bank.distanceKm <= radiusKm &&
     bank.stock?.some((item) =>
       item.bloodGroup === bloodGroup &&
       item.componentType === componentType &&
