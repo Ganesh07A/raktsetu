@@ -2,11 +2,13 @@ import { describe, expect, it, beforeEach } from 'bun:test';
 import { app } from '../index';
 import { mockStore } from '../services/mock-store';
 import { createDonorResponseToken } from '../services/donor-session';
+import { eraktkoshProxy } from '../services/eraktkosh-proxy';
 
 describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
   beforeEach(() => {
     process.env.NODE_ENV = 'test';
     mockStore.reset();
+    eraktkoshProxy.clearCache();
   });
 
   describe('POST / (Create Blood Request)', () => {
