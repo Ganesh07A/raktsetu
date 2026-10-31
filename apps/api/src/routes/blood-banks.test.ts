@@ -1,10 +1,13 @@
 import { describe, expect, it, beforeEach } from 'bun:test';
 import { app } from '../index';
 import { mockStore } from '../services/mock-store';
+import { eraktkoshProxy } from '../services/eraktkosh-proxy';
 
 describe('Blood Banks API Routes (/api/v1/blood-banks)', () => {
   beforeEach(() => {
+    process.env.NODE_ENV = 'test';
     mockStore.reset();
+    eraktkoshProxy.clearCache();
   });
 
   describe('GET /search', () => {
