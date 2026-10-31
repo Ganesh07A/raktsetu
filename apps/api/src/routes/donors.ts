@@ -368,14 +368,32 @@ donorRoutes.get('/profile/:id', async (c) => {
 // PATCH /api/v1/donors/profile/:id/availability
 donorRoutes.patch('/profile/:id/availability', async (c) => {
   const { id } = c.req.param();
-  const body = await c.req.json();
+  const authorization = c.req.header('Authorization') || '';
+  const sessionToken = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  const session = verifyDonorSessionToken(sessionToken);
 
+  if (!session || session.donorId !== id) {
+    return c.json({ error: 'A valid donor session for this profile is required' }, 401);
+  }
+
+  const body = await c.req.json();
   if (typeof body.isAvailable !== 'boolean') {
     return c.json({ error: 'isAvailable boolean is required' }, 400);
   }
 
+  if (isLiveDb()) {
+    try {
+      await db.update(donorProfiles)
+        .set({ isAvailable: body.isAvailable, updatedAt: new Date() })
+        .where(eq(donorProfiles.id, id));
+    } catch (error) {
+      console.error('[@repo/api] Failed to update donor availability:', error);
+      return c.json({ error: 'Unable to update donor availability' }, 500);
+    }
+  }
+
   const updated = mockStore.updateDonorAvailability(id, body.isAvailable);
-  if (!updated) {
+  if (!updated && !isLiveDb()) {
     return c.json({ error: 'Donor not found' }, 404);
   }
 
