@@ -2,11 +2,13 @@ import { describe, expect, it, beforeEach } from 'bun:test';
 import { app } from './index';
 import { mockStore } from './services/mock-store';
 import { createDonorResponseToken } from './services/donor-session';
+import { eraktkoshProxy } from './services/eraktkosh-proxy';
 
 describe('API Server Endpoints', () => {
   beforeEach(() => {
     process.env.NODE_ENV = 'test';
     mockStore.reset();
+    eraktkoshProxy.clearCache();
   });
 
   it('GET /health returns status ok with ISO timestamp', async () => {
