@@ -136,7 +136,7 @@ export function RequestWizard() {
     city: '',
     lat: 20.5937,
     lng: 78.9629,
-    distanceKm: 0,
+    distanceKm: null,
     type: 'Government',
   });
 
@@ -918,7 +918,7 @@ export function RequestWizard() {
                         city: '',
                         lat,
                         lng,
-                        distanceKm: 0,
+                        distanceKm: null,
                         type: 'Government',
                       });
                     }}
@@ -950,7 +950,7 @@ export function RequestWizard() {
                         city: '',
                         lat,
                         lng,
-                        distanceKm: 0,
+                        distanceKm: null,
                         type: 'Government',
                       });
                     }}
@@ -1143,7 +1143,7 @@ export function RequestWizard() {
                       id: 'not-at-hospital',
                       name: isHi ? 'घर पर / ट्रांजिट में' : 'At Home / In Transit',
                       city: selectedDistrict,
-                      distanceKm: 0,
+                      distanceKm: null,
                       lat,
                       lng,
                       type: 'Private',
@@ -1188,7 +1188,7 @@ export function RequestWizard() {
                           id: `custom-${Date.now()}`,
                           name: hospitalSearch.trim(),
                           city: selectedDistrict,
-                          distanceKm: 1.0,
+                          distanceKm: null,
                           lat,
                           lng,
                           type: 'Private',
@@ -1236,7 +1236,9 @@ export function RequestWizard() {
                           <span>{hospital.city}</span>
                           <span>·</span>
                           <span className="font-semibold text-rose-600">
-                            {hospital.distanceKm} km
+                            {hospital.distanceKm !== null
+                              ? `${hospital.distanceKm.toFixed(1)} km`
+                              : (isHi ? 'दूरी उपलब्ध नहीं' : 'Distance unavailable')}
                           </span>
                           <span>·</span>
                           <span className="text-[11px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-600">
@@ -1278,7 +1280,7 @@ export function RequestWizard() {
                       id: 'skipped',
                       name: isHi ? 'अस्पताल निर्दिष्ट नहीं' : 'Hospital Not Specified',
                       city: selectedDistrict,
-                      distanceKm: 0,
+                      distanceKm: null,
                       lat,
                       lng,
                       type: 'Private',
