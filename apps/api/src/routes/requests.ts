@@ -12,7 +12,8 @@ import {
 } from '@repo/shared';
 import { mockStore } from '../services/mock-store';
 import { donorMatcher } from '../services/donor-matcher';
-import { whatsappService } from '../services/whatsapp';
+import { pushNotificationService } from '../services/push-notifications';
+import { createDonorResponseToken } from '../services/donor-session';
 import { requestService } from '../services/request-service';
 
 export const requestRoutes = new Hono();
@@ -146,33 +147,39 @@ requestRoutes.post('/', async (c) => {
         '$1 $2****$3'
       );
 
-      // Dispatch WhatsApp Business notification
-      const sendResult = await whatsappService.sendDonationRequest({
-        recipientPhone: donor.phone,
-        donorId: donor.id,
-        donorName: donor.name,
-        requestId,
-        patientName: newRequest.patientName,
-        hospitalName: newRequest.hospitalName,
-        bloodGroup: newRequest.bloodGroupNeeded,
-        unitsNeeded: newRequest.unitsNeeded,
-        distanceKm: donor.distanceKm,
-        language: donor.preferredLanguage || 'en',
-      });
-
+      const responseToken = createDonorResponseToken(requestId, donor.id);
       await requestService.recordNotification({
         id: notifId,
         requestId,
         donorId: donor.id,
-        whatsappMessageId: sendResult.messageId,
-        status: 'sent',
+        status: 'pending',
         donorName: donor.name,
         donorBloodGroup: donor.bloodGroup,
         donorPhoneMasked: maskedPhone,
         sentAt: new Date().toISOString(),
       });
 
-      notificationsSent++;
+      const deviceTokens = await requestService.getPushTokensForDonor(donor.id);
+      const sendResult = await pushNotificationService.sendDonationRequest({
+        tokens: deviceTokens,
+        requestId,
+        responseToken,
+        bloodGroup: newRequest.bloodGroupNeeded,
+        distanceKm: donor.distanceKm,
+        language: donor.preferredLanguage || 'en',
+      });
+
+      await requestService.updateNotificationDelivery({
+        requestId,
+        donorId: donor.id,
+        status: sendResult.success ? 'sent' : 'failed',
+        pushMessageId: sendResult.messageId,
+      });
+
+      for (const invalidToken of sendResult.invalidTokens) {
+        await requestService.removePushSubscriptionToken(donor.id, invalidToken);
+      }
+      if (sendResult.success) notificationsSent++;
     }
   }
 
