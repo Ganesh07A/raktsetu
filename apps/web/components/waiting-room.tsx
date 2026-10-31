@@ -82,6 +82,7 @@ export function WaitingRoom({ requestId, requestCloseToken, initialData }: Waiti
   }, [requestId]);
 
   const isFulfilled = request?.status === 'fulfilled' || acceptedDonors.length > 0;
+  const hasBankStock = request?.status === 'bank_found';
   const isClosed = request?.status === 'cancelled' || request?.status === 'expired';
   const pushSent = notifications.some((item) =>
     ['sent', 'delivered', 'read', 'accepted'].includes(item.status)
@@ -133,10 +134,12 @@ export function WaitingRoom({ requestId, requestCloseToken, initialData }: Waiti
       <Card className={isFulfilled ? 'border-emerald-300 bg-emerald-50/50' : isClosed ? 'border-slate-300 bg-slate-50' : 'border-red-200'}>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between gap-3">
-            <Badge variant={isFulfilled ? 'success' : 'outline'}>
-              {isFulfilled
-                ? (isHi ? 'दाता ने अनुरोध स्वीकार किया' : 'Donor accepted')
-                : isClosed
+            <Badge variant={isFulfilled || hasBankStock ? 'success' : 'outline'}>
+              {hasBankStock
+                ? (isHi ? 'ब्लड बैंक स्टॉक उपलब्ध' : 'Blood bank stock found')
+                : isFulfilled
+                  ? (isHi ? 'दाता ने अनुरोध स्वीकार किया' : 'Donor accepted')
+                  : isClosed
                   ? (isHi ? 'खोज बंद' : 'Search closed')
                   : (isHi ? 'प्रतिक्रिया की प्रतीक्षा' : 'Waiting for responses')}
             </Badge>
@@ -148,7 +151,12 @@ export function WaitingRoom({ requestId, requestCloseToken, initialData }: Waiti
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {isFulfilled ? (
+          {hasBankStock ? (
+            <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-white p-3 text-sm text-emerald-900">
+              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
+              <p>{isHi ? 'चुने गए दायरे में ब्लड बैंक स्टॉक मिला। इसलिए रक्तदाता पुश अलर्ट भेजने की आवश्यकता नहीं पड़ी।' : 'Blood bank stock was found for this request, so no donor push alerts were needed.'}</p>
+            </div>
+          ) : isFulfilled ? (
             <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-white p-3 text-sm text-emerald-900">
               <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
               <p>{isHi ? 'एक या अधिक रक्तदाताओं ने अनुरोध स्वीकार किया है। नीचे उनके संपर्क विवरण उपलब्ध हैं।' : 'One or more registered donors accepted this request. Their contact details are shown below.'}</p>
@@ -212,12 +220,12 @@ export function WaitingRoom({ requestId, requestCloseToken, initialData }: Waiti
         </section>
       )}
 
-      {!isFulfilled && !isClosed && requestCloseToken && (
+      {!isFulfilled && !hasBankStock && !isClosed && requestCloseToken && (
         <div className="space-y-2">
           <Button
             type="button"
             variant="outline"
-            block
+            className="w-full border-slate-300"
             disabled={closing}
             onClick={handleCloseSearch}
             className="border-slate-300"
