@@ -3,7 +3,7 @@ import { haversineDistance } from '@repo/shared';
 export interface NearbyHospital {
   id: string;
   name: string;
-  distanceKm: number;
+  distanceKm: number | null;
   city: string;
   lat: number;
   lng: number;
