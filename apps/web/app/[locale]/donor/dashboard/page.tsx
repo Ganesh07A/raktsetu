@@ -68,6 +68,7 @@ export default function DonorDashboardPage() {
 
   React.useEffect(() => {
     if (!donorId) return;
+    const currentDonorId = donorId;
 
     const controller = new AbortController();
     async function loadProfile() {
@@ -77,7 +78,7 @@ export default function DonorDashboardPage() {
         const session = localStorage.getItem('raktkhoj_donor_token');
         if (!session) throw new Error('Donor sign-in session is missing. Please register again.');
 
-        const response = await fetch(`${API_BASE}/api/v1/donors/profile/${encodeURIComponent(donorId)}`, {
+        const response = await fetch(`${API_BASE}/api/v1/donors/profile/${encodeURIComponent(currentDonorId)}`, {
           headers: { Authorization: `Bearer ${session}` },
           cache: 'no-store',
           signal: controller.signal,
