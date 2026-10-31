@@ -79,18 +79,17 @@ requestRoutes.post('/', async (c) => {
   const radiusKm = Number(searchRadiusKm) as RadiusPreset;
   const requestId = `req-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-  // Stage 1: Check the selected region for real stock. Seed inventory is test-only.
-  const bankSearch = process.env.NODE_ENV === 'test'
-    ? { banks: mockStore.getBloodBanks() }
-    : await eraktkoshProxy.searchStock({
-        lat: latitude,
-        lng: longitude,
-        radiusKm,
-        bloodGroup: bloodGroupNeeded as BloodGroup,
-        componentType: componentType as ComponentType,
-        stateCode: state,
-        districtCode: district,
-      });
+  // Stage 1: Use the same radius-aware stock search in tests and production.
+  // The proxy supplies seeded fixtures only in test mode and live results otherwise.
+  const bankSearch = await eraktkoshProxy.searchStock({
+    lat: latitude,
+    lng: longitude,
+    radiusKm,
+    bloodGroup: bloodGroupNeeded as BloodGroup,
+    componentType: componentType as ComponentType,
+    stateCode: state,
+    districtCode: district,
+  });
 
   const bankFound = bankSearch.banks.some((bank) => {
     const measuredNearby = bank.distanceKm !== null && bank.distanceKm <= radiusKm;
