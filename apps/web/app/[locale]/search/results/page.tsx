@@ -57,6 +57,13 @@ export default function SearchResultsPage() {
   // Data fetching states
   const [loading, setLoading] = React.useState(true);
   const [banks, setBanks] = React.useState<BloodBankCardData[]>([]);
+  const hasBankStock = banks.some((bank) =>
+    bank.stock?.some((item) =>
+      item.bloodGroup === bloodGroup &&
+      item.componentType === componentType &&
+      item.unitsAvailable >= unitsNeeded
+    )
+  );
   const hasMeasuredBankDistances = banks.some((bank) => bank.distanceKm !== null);
   const hasUnknownBankDistances = banks.some((bank) => bank.distanceKm === null);
   const [hasCompatibleDonors, setHasCompatibleDonors] = React.useState<boolean | null>(null);
@@ -98,13 +105,28 @@ export default function SearchResultsPage() {
           foundBanks = bankData.banks || [];
         }
 
-        // Check if banks have stock for the requested group
-        const banksWithStock = foundBanks.filter((b) =>
-          b.stock?.some((s) => s.bloodGroup === bloodGroup && s.componentType === componentType && s.unitsAvailable > 0)
-        );
+        // Keep all returned banks. Rank banks with enough matching stock first,
+        // then use actual measured distance. Unknown distances are listed last.
+        const rankedBanks = [...foundBanks].sort((a, b) => {
+          const aHasStock = a.stock?.some((item) =>
+            item.bloodGroup === bloodGroup &&
+            item.componentType === componentType &&
+            item.unitsAvailable >= unitsNeeded
+          ) ?? false;
+          const bHasStock = b.stock?.some((item) =>
+            item.bloodGroup === bloodGroup &&
+            item.componentType === componentType &&
+            item.unitsAvailable >= unitsNeeded
+          ) ?? false;
+          if (aHasStock !== bHasStock) return aHasStock ? -1 : 1;
+          if (a.distanceKm === null && b.distanceKm !== null) return 1;
+          if (a.distanceKm !== null && b.distanceKm === null) return -1;
+          if (a.distanceKm === null || b.distanceKm === null) return 0;
+          return a.distanceKm - b.distanceKm;
+        });
 
         if (isMounted) {
-          setBanks(banksWithStock);
+          setBanks(rankedBanks);
         }
 
         // Always query compatible donors for potential fallback
@@ -280,7 +302,7 @@ export default function SearchResultsPage() {
                 <span>
                   {isHi
                     ? `सत्यापित ब्लड बैंक उपलब्ध (${banks.length})`
-                    : `Verified Blood Banks with Available Stock (${banks.length})`}
+                    : `Blood banks in this area (${banks.length})`}
                 </span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -290,7 +312,7 @@ export default function SearchResultsPage() {
               </p>
             </div>
             <Badge variant="success" className="text-xs">
-              {isHi ? 'स्टॉक उपलब्ध' : 'Stock In-Hand'}
+              {isHi ? (hasBankStock ? 'स्टॉक उपलब्ध' : 'स्टॉक नहीं मिला') : (hasBankStock ? 'Matching stock found' : 'No matching stock')}
             </Badge>
           </div>
 
@@ -424,7 +446,7 @@ export default function SearchResultsPage() {
       )}
 
       {/* STAGE 2: Push fallback when no bank inventory is returned */}
-      {!loading && banks.length === 0 && (
+      {!loading && !hasBankStock && (
         <section className="space-y-4">
           <Card className="border border-slate-200">
             <CardHeader>
