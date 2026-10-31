@@ -1501,11 +1501,12 @@ export function RequestWizard() {
               </span>
               <Button
                 type="button"
-                onClick={() => goToStep('SCREEN_DONORS_FOUND')}
+                onClick={handleFindDonors}
+                disabled={donorLookupLoading || !isLocationResolved}
                 className="w-full h-12 rounded-xl text-base font-semibold shadow-md bg-rose-500 hover:bg-rose-600 text-white flex items-center justify-center gap-2 active:scale-[0.99]"
               >
-                <Radio className="w-5 h-5 animate-pulse" />
-                <span>{isHi ? 'अपने नज़दीक रक्तदाता खोजें' : 'Search Donors Near You'}</span>
+                {donorLookupLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Radio className="w-5 h-5 animate-pulse" />}
+                <span>{isHi ? 'अपने नज़दीक रक्तदाता खोजें' : 'Search eligible donors near you'}</span>
               </Button>
             </div>
           </div>
@@ -1518,72 +1519,55 @@ export function RequestWizard() {
           <div className="p-5 flex-1 flex flex-col justify-between">
             <div>
               <h1 className="text-2xl font-bold text-slate-900 tracking-tight leading-snug">
-                {isHi ? `हमें ${donorsCount} रक्तदाता मिले हैं` : `We found ${donorsCount} donors`}
+                {isHi ? 'आपके क्षेत्र में संगत रक्तदाता' : 'Compatible donors in your area'}
               </h1>
-              <p className="text-sm text-slate-500 mt-1 leading-relaxed">
+              <p className="mt-2 text-sm leading-relaxed text-slate-600">
                 {isHi
-                  ? `${radiusKm} किमी के भीतर पंजीकृत ${selectedBloodGroup || 'AB+'} और संगत रक्तदाता।`
-                  : `Registered ${selectedBloodGroup || 'AB+'} & compatible donors within ${radiusKm} km.`}
+                  ? `${radiusKm} किमी के भीतर उपलब्ध और इस डिवाइस पर सूचना चालू रखने वाले पंजीकृत रक्तदाताओं को ही अनुरोध भेजा जाएगा।`
+                  : `Only registered, available donors with push notifications enabled on their devices can receive this request within ${radiusKm} km.`}
               </p>
 
-              {/* Overlapping Avatar Stack */}
-              <div className="flex items-center -space-x-3 mt-4">
-                <img
-                  src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80"
-                  alt="Donor"
-                  className="w-12 h-12 rounded-full border-2 border-white object-cover shadow-sm"
-                />
-                <img
-                  src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&auto=format&fit=crop&q=80"
-                  alt="Donor"
-                  className="w-12 h-12 rounded-full border-2 border-white object-cover shadow-sm"
-                />
-                <div className="w-12 h-12 rounded-full border-2 border-white bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-600 shadow-sm">
-                  +12
-                </div>
-              </div>
-
-              {/* Verification Card */}
-              <div className="mt-8 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs flex items-center justify-between">
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">
-                    {isHi ? 'आप पहले से सत्यापित हैं' : "You're already verified"}
-                  </h3>
-                  <p className="text-sm text-slate-500 mt-0.5">
-                    {isHi ? `साइन इन नंबर: ${userPhone}` : `Signed in as ${userPhone}`}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const newP = prompt('Enter your phone number:', userPhone);
-                      if (newP) setUserPhone(newP);
-                    }}
-                    className="text-sm font-semibold text-rose-600 hover:text-rose-700 mt-2 block"
-                  >
-                    {isHi ? 'नंबर बदलें' : 'Change Number'}
-                  </button>
-                </div>
-
-                {/* Glowing Green Verification Badge */}
-                <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-inner">
-                  <CheckCircle2 className="w-8 h-8 fill-emerald-500 text-white" />
-                </div>
+              <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
+                {donorLookupLoading ? (
+                  <div className="flex items-center gap-3 text-sm text-slate-600">
+                    <Loader2 className="h-5 w-5 animate-spin text-rose-600" />
+                    {isHi ? 'पंजीकृत रक्तदाताओं की जाँच हो रही है…' : 'Checking registered, notification-enabled donors…'}
+                  </div>
+                ) : donorLookupError ? (
+                  <p role="alert" className="text-sm text-red-700">{donorLookupError}</p>
+                ) : donorsCount > 0 ? (
+                  <div className="flex items-start gap-3">
+                    <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-emerald-600" />
+                    <p className="text-sm text-slate-700">
+                      {isHi
+                        ? 'इस क्षेत्र में योग्य सूचना-सक्षम रक्तदाता उपलब्ध हैं। वास्तविक अनुरोध बनाते समय केवल मेल खाने वाले रक्तदाताओं को अलर्ट भेजा जाएगा।'
+                        : 'Eligible notification-enabled donor registrations are available in this area. When you send the request, the API will notify only the matching donors.'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="mt-0.5 h-6 w-6 shrink-0 text-amber-600" />
+                    <p className="text-sm text-slate-700">
+                      {isHi
+                        ? 'अभी इस क्षेत्र में सक्रिय सूचना-सदस्यता वाला कोई संगत रक्तदाता नहीं मिला। आप फिर भी अनुरोध बना सकते हैं; कोई झूठा अलर्ट नहीं दिखाया जाएगा।'
+                        : 'No compatible donor with an active push subscription was found in this area right now. You can still create the request; the system will not show or message demo donors.'}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Bottom Continue Action */}
-            <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-white/95 backdrop-blur-md border-t border-slate-100 z-30">
+            <div className="fixed bottom-0 left-0 right-0 z-30 mx-auto max-w-md border-t border-slate-100 bg-white/95 p-4 backdrop-blur-md">
               <Button
                 type="button"
                 onClick={() => goToStep('STEP_4_PATIENT_DETAILS')}
-                className="w-full h-12 rounded-xl text-base font-semibold shadow-md bg-rose-500 hover:bg-rose-600 text-white active:scale-[0.99]"
+                className="h-12 w-full rounded-xl bg-rose-500 text-base font-semibold text-white shadow-md hover:bg-rose-600"
               >
-                {isHi ? 'अभी जारी रखें' : 'Continue now'}
+                {isHi ? 'आगे बढ़ें' : 'Continue'}
               </Button>
             </div>
           </div>
         )}
-
         {/* ========================================================================= */}
         {/* STEP 4: PATIENT DETAILS (Matching Reference Screen 9) */}
         {/* ========================================================================= */}
@@ -1817,14 +1801,15 @@ export function RequestWizard() {
               </div>
             </div>
 
-            {/* Bottom Send to Donors Action */}
+            {requestError && <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800">{requestError}</p>}
+            {/* Send the actual request; donor matching and notification delivery are handled by the API. */}
             <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-white/95 backdrop-blur-md border-t border-slate-100 z-30">
               <Button
                 type="button"
                 onClick={handleSendRequest}
                 className="w-full h-12 rounded-xl text-base font-semibold shadow-md bg-rose-500 hover:bg-rose-600 text-white active:scale-[0.99]"
               >
-                {isHi ? `${donorsCount} रक्तदाताओं को भेजें` : `Send to ${donorsCount} donors`}
+                {isHi ? 'आपातकालीन अनुरोध भेजें' : 'Send emergency request'}
               </Button>
             </div>
           </div>
@@ -1845,8 +1830,8 @@ export function RequestWizard() {
             </h2>
             <p className="text-sm text-slate-500 mt-2">
               {isHi
-                ? `आपके नज़दीक ${donorsCount} रक्तदाता(ओं) को सूचित किया जा रहा है...`
-                : `Notifying ${donorsCount} donor(s) near you...`}
+                ? 'योग्य रक्तदाताओं को सुरक्षित पुश सूचना भेजी जा रही है…'
+                : 'Sending push notifications to eligible registered donors…'}
             </p>
           </div>
         )}
