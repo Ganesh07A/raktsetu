@@ -23,6 +23,7 @@ import {
   Users,
 } from 'lucide-react';
 import type { DonorProfile } from '@repo/shared';
+import { PushNotificationOptIn } from '../../../components/push-notification-opt-in';
 
 export default function DonorDashboardPage() {
   const locale = useLocale();
@@ -196,6 +197,8 @@ export default function DonorDashboardPage() {
           </div>
         </div>
       </div>
+
+      <PushNotificationOptIn />
 
       {statusMessage && (
         <div className="p-3 rounded-lg bg-emerald-50 text-emerald-800 text-xs font-semibold border border-emerald-200 flex items-center gap-2">

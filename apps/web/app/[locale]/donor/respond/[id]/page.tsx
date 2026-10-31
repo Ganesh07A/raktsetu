@@ -23,6 +23,8 @@ import {
 } from 'lucide-react';
 import type { BloodRequest } from '@repo/shared';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3002';
+
 export default function DonorRespondPage() {
   const locale = useLocale();
   const isHi = locale === 'hi';
@@ -30,7 +32,9 @@ export default function DonorRespondPage() {
   const searchParams = useSearchParams();
 
   const requestId = (params?.id as string) || '';
-  const donorId = searchParams.get('donorId') || '';
+  const responseToken = searchParams.get('responseToken') || '';
+  const autoAction = searchParams.get('action');
+  const autoActionHandled = React.useRef(false);
 
   const [request, setRequest] = React.useState<BloodRequest | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -43,7 +47,7 @@ export default function DonorRespondPage() {
   React.useEffect(() => {
     async function loadRequest() {
       try {
-        const res = await fetch(`http://localhost:3002/api/v1/requests/${requestId}`, {
+        const res = await fetch(`${API_BASE}/api/v1/requests/${requestId}`, {
           cache: 'no-store',
         });
         if (!res.ok) {
@@ -66,18 +70,16 @@ export default function DonorRespondPage() {
   const handleRespond = async (status: 'accepted' | 'declined') => {
     setSubmitting(true);
     try {
-      const res = await fetch(`http://localhost:3002/api/v1/requests/${requestId}/respond`, {
+      if (!responseToken) throw new Error('This notification response link is missing or expired.');
+      const res = await fetch(`${API_BASE}/api/v1/push/respond`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status,
-          donorId: donorId || 'volunteer-donor',
-          responseNote: status === 'accepted' ? 'I can donate blood immediately' : 'Not available right now',
-        }),
+        body: JSON.stringify({ action: status, responseToken }),
       });
 
       if (!res.ok) {
-        throw new Error('Failed to record response');
+        const result = await res.json().catch(() => ({}));
+        throw new Error(result.error || 'Failed to record response');
       }
 
       setRespondedStatus(status);
@@ -87,6 +89,29 @@ export default function DonorRespondPage() {
       setSubmitting(false);
     }
   };
+
+  React.useEffect(() => {
+    if (loading || !request || !responseToken || autoActionHandled.current) return;
+    if (autoAction !== 'accepted' && autoAction !== 'declined') return;
+    autoActionHandled.current = true;
+    void (async () => {
+      setSubmitting(true);
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/push/respond`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: autoAction, responseToken }),
+        });
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(result.error || 'Unable to record notification response');
+        setRespondedStatus(autoAction);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unable to record response');
+      } finally {
+        setSubmitting(false);
+      }
+    })();
+  }, [loading, request, responseToken, autoAction]);
 
   if (loading) {
     return (
@@ -257,6 +282,7 @@ export default function DonorRespondPage() {
           </div>
 
           <div className="space-y-3 pt-2">
+            {!responseToken && <p role="alert" className="text-xs text-red-700 text-center">This response link is invalid or expired. Open the latest RaktSetu notification to respond.</p>}
             <p className="text-xs font-bold text-slate-800 text-center">
               {isHi
                 ? 'क्या आप अभी इस मरीज के लिए रक्तदान कर सकते हैं?'
@@ -269,6 +295,7 @@ export default function DonorRespondPage() {
                 type="button"
                 onClick={() => handleRespond('accepted')}
                 loading={submitting}
+                disabled={!responseToken}
                 className="h-14 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm rounded-xl shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
               >
                 <CheckCircle2 className="h-5 w-5" />
@@ -281,6 +308,7 @@ export default function DonorRespondPage() {
                 type="button"
                 onClick={() => handleRespond('declined')}
                 loading={submitting}
+                disabled={!responseToken}
                 variant="outline"
                 className="h-14 border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-sm rounded-xl active:scale-95 transition-all flex items-center justify-center gap-2"
               >
