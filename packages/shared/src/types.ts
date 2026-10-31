@@ -136,7 +136,7 @@ export interface BloodBankCardData {
   email?: string | null;
   latitude: number | null;
   longitude: number | null;
-  distanceKm: number;
+  distanceKm: number | null;
   stock: StockItem[];
   isVerified: boolean;
   source: BloodBankSource;
