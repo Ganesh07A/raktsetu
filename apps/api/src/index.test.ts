@@ -1,10 +1,14 @@
 import { describe, expect, it, beforeEach } from 'bun:test';
 import { app } from './index';
 import { mockStore } from './services/mock-store';
+import { createDonorResponseToken } from './services/donor-session';
+import { eraktkoshProxy } from './services/eraktkosh-proxy';
 
 describe('API Server Endpoints', () => {
   beforeEach(() => {
+    process.env.NODE_ENV = 'test';
     mockStore.reset();
+    eraktkoshProxy.clearCache();
   });
 
   it('GET /health returns status ok with ISO timestamp', async () => {
@@ -64,21 +68,11 @@ describe('API Server Endpoints', () => {
     expect(res.status).toBe(404);
   });
 
-  it('GET /api/v1/whatsapp/webhook handles challenge correctly', async () => {
-    process.env.WHATSAPP_VERIFY_TOKEN = 'raktkhoj_verify_token';
+  it('does not expose the retired WhatsApp webhook endpoint', async () => {
     const res = await app.request(
-      '/api/v1/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=raktkhoj_verify_token&hub.challenge=test_challenge'
+      '/api/v1/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=arbitrary&hub.challenge=test_challenge'
     );
-    expect(res.status).toBe(200);
-    const text = await res.text();
-    expect(text).toBe('test_challenge');
-  });
-
-  it('GET /api/v1/whatsapp/webhook rejects invalid token', async () => {
-    const res = await app.request(
-      '/api/v1/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=wrong_token&hub.challenge=test_challenge'
-    );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it('POST /api/v1/donors/register registers a volunteer donor', async () => {
@@ -90,7 +84,6 @@ describe('API Server Endpoints', () => {
       longitude: 77.21,
       state: 'Delhi',
       district: 'South Delhi',
-      whatsappConsent: true,
       preferredLanguage: 'en',
     };
 
@@ -178,12 +171,13 @@ describe('API Server Endpoints', () => {
     const created = (await createRes.json()) as { request: { id: string } };
     const requestId = created.request.id;
 
-    // 2. Direct respond from donor (deep link)
-    const respondRes = await app.request(`/api/v1/requests/${requestId}/respond`, {
+    // 2. Respond through the signed push-response token (the legacy client-supplied donorId route is removed)
+    const donorId = 'donor-amit-ab-neg';
+    const respondRes = await app.request('/api/v1/push/respond', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        donorId: 'donor-amit-ab-neg',
+        responseToken: createDonorResponseToken(requestId, donorId),
         action: 'accepted',
       }),
     });
@@ -195,13 +189,12 @@ describe('API Server Endpoints', () => {
 
     const waitingBody = (await waitingRes.json()) as {
       request: { status: string; fulfillmentSource: string };
-      acceptedDonors: Array<{ name: string; phone: string; directCallUrl: string; whatsappUrl: string }>;
+      acceptedDonors: Array<{ name: string; phone: string; directCallUrl: string }>;
     };
     expect(waitingBody.request.status).toBe('fulfilled');
     expect(waitingBody.request.fulfillmentSource).toBe('donor');
     expect(waitingBody.acceptedDonors.length).toBeGreaterThan(0);
     expect(waitingBody.acceptedDonors[0]!.phone).toContain('+91');
     expect(waitingBody.acceptedDonors[0]!.directCallUrl).toContain('tel:');
-    expect(waitingBody.acceptedDonors[0]!.whatsappUrl).toContain('https://wa.me/');
   });
 });

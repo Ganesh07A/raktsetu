@@ -4,8 +4,8 @@ import * as React from 'react';
 import { useLocale } from 'next-intl';
 import { useRouter } from '../src/routing';
 import { Button } from '@repo/ui/button';
-import { Badge } from '@repo/ui/badge';
 import { MapView, type MapMarkerItem } from './map-view';
+import { WaitingRoom } from './waiting-room';
 import {
   ArrowLeft,
   X,
@@ -29,17 +29,13 @@ import {
   Info,
   Building2,
   User,
-  Heart,
-  Droplet,
   AlertCircle,
-  MessageCircle,
 } from 'lucide-react';
 import {
   BLOOD_GROUPS,
   getCompatibleDonorGroups,
   ALL_INDIAN_STATES,
   getDistrictsForState,
-  matchStateAndDistrict,
   type BloodGroup,
 } from '@repo/shared';
 
@@ -78,6 +74,10 @@ const CONDITION_TAGS = [
 
 import { type NearbyHospital, getHospitalsForDistrict } from './regional-hospitals';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3002';
+const NOMINATIM_CACHE_PREFIX = 'raktkhoj-geocode-v1:';
+let lastNominatimLookup = 0;
+
 export type WizardStep =
   | 'STEP_1_BLOOD_GROUP'
   | 'STEP_2_LOCATION'
@@ -107,9 +107,11 @@ export function RequestWizard() {
   // Step 2: Location
   const [locationType, setLocationType] = React.useState<'precise' | 'approximate'>('precise');
   const [selectedState, setSelectedState] = React.useState('Maharashtra');
-  const [selectedDistrict, setSelectedDistrict] = React.useState('Mumbai Suburban');
-  const [lat, setLat] = React.useState(19.0760);
-  const [lng, setLng] = React.useState(72.8777);
+  const [selectedDistrict, setSelectedDistrict] = React.useState('');
+  // Coordinates are unresolved until GPS or district geocoding succeeds.
+  const [lat, setLat] = React.useState<number>(20.5937);
+  const [lng, setLng] = React.useState<number>(78.9629);
+  const [isLocationResolved, setIsLocationResolved] = React.useState(false);
   const [isLocating, setIsLocating] = React.useState(false);
   const [locatingStatus, setLocatingStatus] = React.useState('');
   const [isGpsActive, setIsGpsActive] = React.useState(false);
@@ -127,9 +129,14 @@ export function RequestWizard() {
     return getHospitalsForDistrict(selectedState, selectedDistrict, lat, lng);
   }, [selectedState, selectedDistrict, lat, lng]);
 
-  const [selectedHospital, setSelectedHospital] = React.useState<NearbyHospital>(() => {
-    const list = getHospitalsForDistrict('Maharashtra', 'Mumbai Suburban', 19.0760, 72.8777);
-    return list[0]!;
+  const [selectedHospital, setSelectedHospital] = React.useState<NearbyHospital>({
+    id: 'unselected-hospital',
+    name: '',
+    city: '',
+    lat: 20.5937,
+    lng: 78.9629,
+    distanceKm: null,
+    type: 'Government',
   });
 
   // Auto-update selected hospital when state or district changes
@@ -140,15 +147,15 @@ export function RequestWizard() {
   }, [activeRegionHospitals, isHospitalOptional]);
 
   // Blood Bank Screen
-  const [radiusKm, setRadiusKm] = React.useState<25 | 50 | 100>(100);
+  const [radiusKm, setRadiusKm] = React.useState<25 | 50 | 100>(25);
   const [banksList, setBanksList] = React.useState<any[]>([]);
   const [banksLoading, setBanksLoading] = React.useState(false);
+  const [banksError, setBanksError] = React.useState<string | null>(null);
 
-  // Donors Found Screen
-  const [donorsCount, setDonorsCount] = React.useState(14);
-  const [userPhone, setUserPhone] = React.useState('8177995355');
-  const [isPhoneVerified, setIsPhoneVerified] = React.useState(true);
-  const [editingPhone, setEditingPhone] = React.useState(false);
+  // Donors Found Screen. The count is used only to describe whether matching registrations exist.
+  const [donorsCount, setDonorsCount] = React.useState(0);
+  const [donorLookupLoading, setDonorLookupLoading] = React.useState(false);
+  const [donorLookupError, setDonorLookupError] = React.useState<string | null>(null);
 
   // Step 4: Patient Details
   const [patientName, setPatientName] = React.useState('');
@@ -165,20 +172,8 @@ export function RequestWizard() {
 
   // Waiting Room
   const [createdRequestId, setCreatedRequestId] = React.useState<string | null>(null);
-  const [acceptedDonors, setAcceptedDonors] = React.useState<any[]>([
-    {
-      id: 'donor-om',
-      name: 'Om Prakash',
-      bloodGroup: 'AB-',
-      distanceKm: 1.0,
-      gender: 'Male',
-      age: 20,
-      phone: '+919876543210',
-      avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    },
-  ]);
-  const [acceptedCount, setAcceptedCount] = React.useState(1);
-  const [targetCount] = React.useState(3);
+  const [requestCloseToken, setRequestCloseToken] = React.useState<string | null>(null);
+  const [requestError, setRequestError] = React.useState<string | null>(null);
 
   // Audio / Speech Synthesis
   const [isSpeaking, setIsSpeaking] = React.useState(false);
@@ -296,13 +291,36 @@ export function RequestWizard() {
         }
       }
 
-      // 3. Match against official Pan-India 36 States & 781 Districts
-      const matched = matchStateAndDistrict(stateName, districtName);
-      setSelectedState(matched.state);
-      setSelectedDistrict(matched.district);
+      // 3. Apply reverse-geocoded state/district only when they match the official list.
+      // Never let the shared helper's old Mumbai default override the actual GPS coordinates.
+      const normalizedState = ALL_INDIAN_STATES.find(
+        (candidate) => candidate.toLowerCase() === stateName.trim().toLowerCase()
+      );
 
-      const finalDisplay = displayName || `${matched.district}, ${matched.state}`;
-      setDetectedLocationName(finalDisplay);
+      if (normalizedState && districtName.trim()) {
+        const validDistricts = getDistrictsForState(normalizedState) || [];
+        const normalizedDistrict = validDistricts.find((candidate) => {
+          const districtLower = candidate.toLowerCase();
+          const geocoderDistrict = districtName.trim().toLowerCase();
+          return districtLower === geocoderDistrict ||
+            districtLower.includes(geocoderDistrict) ||
+            geocoderDistrict.includes(districtLower);
+        });
+
+        setSelectedState(normalizedState);
+        setSelectedDistrict(normalizedDistrict || '');
+        setDetectedLocationName(
+          displayName || [districtName, normalizedState].filter(Boolean).join(', ')
+        );
+      } else {
+        // GPS is still valid even if the reverse-geocoder cannot identify a district.
+        // Keep a recognized state, but never substitute a different district.
+        if (normalizedState) setSelectedState(normalizedState);
+        setSelectedDistrict('');
+        setDetectedLocationName(displayName || (isHi ? 'जीपीएस स्थान' : 'GPS location'));
+      }
+
+      setIsLocationResolved(true);
       setIsGpsActive(true);
       setLocationError(null);
     } catch (err) {
@@ -333,6 +351,7 @@ export function RequestWizard() {
         const coords = pos.coords;
         setLat(coords.latitude);
         setLng(coords.longitude);
+        setIsLocationResolved(true);
         setGpsAccuracy(
           coords.accuracy && coords.accuracy < 100 ? 'Precise' : 'Approximate'
         );
@@ -370,92 +389,205 @@ export function RequestWizard() {
     );
   };
 
-  // Trigger Radar Scan and fetch Blood Banks with daily cache & real state/district
-  const startRadarSearch = () => {
-    goToStep('SCREEN_RADAR');
-    setBanksLoading(true);
+  const resolveManualLocation = async () => {
+    if (!selectedDistrict) {
+      setLocationError(isHi ? 'कृपया पहले राज्य और ज़िला चुनें।' : 'Select a state and district first.');
+      return;
+    }
 
-    // Call Blood Bank API with state, district, and coordinates
-    const fetchBanks = async () => {
+    setIsLocating(true);
+    setLocationError(null);
+    setLocatingStatus(isHi ? 'चुने गए ज़िले का स्थान खोजा जा रहा है…' : 'Resolving selected district coordinates…');
+    try {
+      const cacheKey = `${NOMINATIM_CACHE_PREFIX}${selectedState.toLowerCase()}:${selectedDistrict.toLowerCase()}`;
+      let resolved: { lat: number; lng: number; displayName: string } | null = null;
+
       try {
-        const query = new URLSearchParams({
-          lat: lat.toString(),
-          lng: lng.toString(),
-          bloodGroup: selectedBloodGroup || 'AB+',
-          radiusKm: radiusKm.toString(),
-          state: selectedState,
-          district: selectedDistrict,
-          componentType: selectedComponent,
-        });
-        const res = await fetch(`http://localhost:3002/api/v1/blood-banks/search?${query.toString()}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.banks && data.banks.length > 0) {
-            setBanksList(data.banks);
-          } else {
-            setBanksList(activeRegionHospitals);
-          }
-        } else {
-          setBanksList(activeRegionHospitals);
-        }
+        const cached = sessionStorage.getItem(cacheKey);
+        if (cached) resolved = JSON.parse(cached) as { lat: number; lng: number; displayName: string };
       } catch {
-        setBanksList(activeRegionHospitals);
-      } finally {
-        setBanksLoading(false);
+        // Ignore stale or malformed local geocoding cache.
       }
-    };
 
-    fetchBanks();
+      if (!resolved) {
+        const waitMs = Math.max(0, 1100 - (Date.now() - lastNominatimLookup));
+        if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+        lastNominatimLookup = Date.now();
 
-    // Auto-transition from radar to blood banks after 1.8 seconds (realistic animation)
-    setTimeout(() => {
-      goToStep('SCREEN_BLOOD_BANKS');
-    }, 1800);
+        const query = new URLSearchParams({
+          q: `${selectedDistrict}, ${selectedState}, India`,
+          format: 'jsonv2',
+          limit: '1',
+          countrycodes: 'in',
+        });
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?${query.toString()}`, {
+          headers: { Accept: 'application/json' },
+          cache: 'no-store',
+        });
+        if (!response.ok) throw new Error('Location lookup service is unavailable.');
+        const results = await response.json() as Array<{ lat?: string; lon?: string; display_name?: string }>;
+        const first = results[0];
+        const nextLat = Number(first?.lat);
+        const nextLng = Number(first?.lon);
+        if (!Number.isFinite(nextLat) || !Number.isFinite(nextLng)) {
+          throw new Error(isHi
+            ? 'इस ज़िले का मानचित्र स्थान नहीं मिला। कृपया GPS का उपयोग करें।'
+            : 'Could not resolve this district on the map. Please use GPS instead.');
+        }
+        resolved = {
+          lat: nextLat,
+          lng: nextLng,
+          displayName: first?.display_name || `${selectedDistrict}, ${selectedState}`,
+        };
+        try { sessionStorage.setItem(cacheKey, JSON.stringify(resolved)); } catch { /* cache is optional */ }
+      }
+
+      setLat(resolved.lat);
+      setLng(resolved.lng);
+      setIsLocationResolved(true);
+      setIsGpsActive(false);
+      setDetectedLocationName(resolved.displayName);
+      const hospitals = getHospitalsForDistrict(selectedState, selectedDistrict, resolved.lat, resolved.lng);
+      if (hospitals.length > 0) setSelectedHospital(hospitals[0]!);
+      goToStep('STEP_3_HOSPITAL');
+    } catch (error) {
+      setLocationError(error instanceof Error ? error.message : 'Unable to resolve selected district.');
+    } finally {
+      setIsLocating(false);
+      setLocatingStatus('');
+    }
   };
 
-  // Dispatches Request to Donors via API
+  const fetchBloodBanks = async (searchRadius: 25 | 50 | 100) => {
+    if (!isLocationResolved) {
+      setBanksError(isHi ? 'पहले मानचित्र पर अपना स्थान तय करें।' : 'Resolve your location before searching for blood banks.');
+      return;
+    }
+
+    setBanksLoading(true);
+    setBanksError(null);
+    try {
+      const query = new URLSearchParams({
+        lat: lat.toString(),
+        lng: lng.toString(),
+        bloodGroup: selectedBloodGroup || 'AB+',
+        radiusKm: searchRadius.toString(),
+        state: selectedState,
+        district: selectedDistrict,
+        componentType: selectedComponent,
+      });
+      const response = await fetch(`${API_BASE}/api/v1/blood-banks/search?${query.toString()}`, {
+        cache: 'no-store',
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Blood bank search failed.');
+      setBanksList(Array.isArray(data.banks) ? data.banks : []);
+    } catch (error) {
+      setBanksList([]);
+      setBanksError(error instanceof Error ? error.message : 'Unable to search blood banks.');
+    } finally {
+      setBanksLoading(false);
+    }
+  };
+
+  // Trigger the blood-bank search using only the resolved selected/GPS coordinates.
+  const startRadarSearch = () => {
+    if (!isLocationResolved) {
+      setLocationError(isHi ? 'कृपया GPS या ज़िले का मानचित्र स्थान तय करें।' : 'Please resolve your location using GPS or your selected district first.');
+      setCurrentStep('STEP_2_LOCATION');
+      return;
+    }
+
+    goToStep('SCREEN_RADAR');
+    void fetchBloodBanks(radiusKm);
+    setTimeout(() => goToStep('SCREEN_BLOOD_BANKS'), 900);
+  };
+
+  const handleFindDonors = async () => {
+    if (!isLocationResolved) {
+      setDonorLookupError(isHi ? 'पहले अपना स्थान तय करें।' : 'Resolve your location before searching for donors.');
+      return;
+    }
+
+    setDonorLookupLoading(true);
+    setDonorLookupError(null);
+    try {
+      const query = new URLSearchParams({
+        bloodGroup: selectedBloodGroup || 'AB+',
+        lat: lat.toString(),
+        lng: lng.toString(),
+        radiusKm: radiusKm.toString(),
+      });
+      const response = await fetch(`${API_BASE}/api/v1/donors/compatible?${query.toString()}`, {
+        cache: 'no-store',
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Donor search failed.');
+      setDonorsCount(Array.isArray(data.donors) ? data.donors.length : Number(data.count || 0));
+      goToStep('SCREEN_DONORS_FOUND');
+    } catch (error) {
+      setDonorLookupError(error instanceof Error ? error.message : 'Unable to search donors.');
+    } finally {
+      setDonorLookupLoading(false);
+    }
+  };
+
+  // Dispatch an actual blood request. The API determines matching subscribed donors and sends FCM.
   const handleSendRequest = async () => {
-    goToStep('SCREEN_SENDING');
+    setRequestError(null);
+    if (!patientName.trim()) {
+      setRequestError(isHi ? 'कृपया मरीज़ का नाम दर्ज करें।' : 'Enter the patient name before sending the request.');
+      return;
+    }
+    if (!selectedHospital.name.trim()) {
+      setRequestError(isHi ? 'अस्पताल चुनें या घर/ट्रांज़िट विकल्प चुनें।' : 'Select a hospital or choose the home/in-transit option.');
+      return;
+    }
+    if (!isLocationResolved) {
+      setRequestError(isHi ? 'अनुरोध भेजने से पहले स्थान तय करें।' : 'Resolve the location before sending the request.');
+      return;
+    }
+
     setIsSending(true);
+    goToStep('SCREEN_SENDING');
 
     try {
       const payload = {
         bloodGroupNeeded: selectedBloodGroup || 'AB+',
         componentType: selectedComponent,
         unitsNeeded: Number(unitsNeeded) || 1,
-        patientName: patientName.trim() || (isHi ? 'साहिब सिंह' : 'Sahib Singh'),
-        patientAge: patientAge ? parseInt(patientAge, 10) : 34,
-        emergencyType: patientCondition || 'Critical',
+        patientName: patientName.trim(),
+        ...(patientAge ? { patientAge: parseInt(patientAge, 10) } : {}),
+        emergencyType: 'other',
         hospitalName: selectedHospital.name,
         latitude: lat,
         longitude: lng,
         state: selectedState,
         district: selectedDistrict,
         searchRadiusKm: radiusKm,
-        requesterPhone: userPhone || '+918177995355',
-        requesterName: 'Family Member',
       };
 
-      const res = await fetch('http://localhost:3002/api/v1/requests', {
+      const response = await fetch(`${API_BASE}/api/v1/requests`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to create emergency request.');
 
-      if (res.ok) {
-        const data = await res.json();
-        setCreatedRequestId(data.requestId || `req-${Date.now()}`);
-      } else {
-        setCreatedRequestId(`req-${Date.now()}`);
+      const requestId = data.request?.id;
+      if (typeof requestId !== 'string' || !requestId) {
+        throw new Error('The API did not return a valid request ID.');
       }
-    } catch {
-      setCreatedRequestId(`req-${Date.now()}`);
+
+      setCreatedRequestId(requestId);
+      setRequestCloseToken(typeof data.requestCloseToken === 'string' ? data.requestCloseToken : null);
+      setTimeout(() => goToStep('SCREEN_WAITING_ROOM'), 700);
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : 'Unable to send emergency request.');
+      goToStep('STEP_6_SEND_REQUEST');
     } finally {
       setIsSending(false);
-      // Seamlessly transition from paper airplane to waiting room
-      setTimeout(() => {
-        goToStep('SCREEN_WAITING_ROOM');
-      }, 1800);
     }
   };
 
@@ -469,34 +601,33 @@ export function RequestWizard() {
     }
   };
 
-  // Blood banks to display (from real eRaktKosh live search or district directory)
-  const displayBanks = banksList && banksList.length > 0 ? banksList : activeRegionHospitals;
+  // Only real blood-bank search results are displayed here. Curated hospitals remain
+  // separate in the hospital-selection step and are never presented as blood banks.
+  const displayBanks = banksList;
 
-  // Map markers for Blood Banks screen centered around user's location & district facilities
   const mapMarkers: MapMarkerItem[] = [
-    {
+    ...(isLocationResolved ? [{
       id: 'user-pin',
       name: isHi ? 'मरीज़ का स्थान' : "Patient's Location",
       latitude: lat,
       longitude: lng,
-      type: 'user',
-    },
-    ...displayBanks.map((h: any, i: number) => ({
-      id: h.id || `bank-${i}`,
-      name: h.name,
-      latitude: h.latitude || h.lat || (lat + 0.008 * (i % 2 === 0 ? 1 : -1) * (i + 1)),
-      longitude: h.longitude || h.lng || (lng + 0.008 * (i % 2 === 0 ? -1 : 1) * (i + 1)),
-      type: 'bank' as const,
-      distanceKm: h.distanceKm || (1.5 + i),
-      isVerified: true,
-      stock: h.stock || [
-        {
-          bloodGroup: selectedBloodGroup || 'AB+',
-          componentType: 'whole_blood',
-          unitsAvailable: i === 0 ? 39 : i === 1 ? 11 : 32,
-        },
-      ],
-    })),
+      type: 'user' as const,
+    }] : []),
+    ...displayBanks.flatMap((bank: any) => {
+      const bankLat = typeof bank.latitude === 'number' ? bank.latitude : null;
+      const bankLng = typeof bank.longitude === 'number' ? bank.longitude : null;
+      if (bankLat === null || bankLng === null) return [];
+      return [{
+        id: bank.id,
+        name: bank.name,
+        latitude: bankLat,
+        longitude: bankLng,
+        type: 'bank' as const,
+        ...(typeof bank.distanceKm === 'number' ? { distanceKm: bank.distanceKm } : {}),
+        isVerified: Boolean(bank.isVerified),
+        stock: Array.isArray(bank.stock) ? bank.stock : [],
+      }];
+    }),
   ];
 
   // Helper text computation
@@ -512,7 +643,7 @@ export function RequestWizard() {
       ? `मुझे तत्काल ${selectedBloodGroup || 'AB+'} रक्त की आवश्यकता है (संगत समूह भी मान्य: ${compatibleList}) — ${unitsNeeded} यूनिट चाहिए। मरीज़ ${selectedHospital.name} में भर्ती है। कृपया जीवन बचाने में सहायता करें।`
       : `I urgently need ${selectedBloodGroup || 'AB+'} blood (compatible groups also accepted: ${compatibleList}) — ${unitsNeeded} units required. Patient is at ${selectedHospital.name}. Please help if you can.`;
 
-  // Filter hospitals in Step 3 dynamically from active regional hospitals
+  // Filter only curated facilities. Unknown districts return no fabricated hospitals.
   const filteredHospitals = activeRegionHospitals.filter((h) =>
     h.name.toLowerCase().includes(hospitalSearch.toLowerCase()) ||
     h.city.toLowerCase().includes(hospitalSearch.toLowerCase())
@@ -797,10 +928,20 @@ export function RequestWizard() {
                     onChange={(e) => {
                       const newState = e.target.value;
                       setSelectedState(newState);
-                      const dists = getDistrictsForState(newState);
-                      setSelectedDistrict(dists[0] || '');
+                      setSelectedDistrict('');
                       setIsGpsActive(false);
+                      setIsLocationResolved(false);
                       setDetectedLocationName(null);
+                      setBanksList([]);
+                      setSelectedHospital({
+                        id: 'unselected-hospital',
+                        name: '',
+                        city: '',
+                        lat,
+                        lng,
+                        distanceKm: null,
+                        type: 'Government',
+                      });
                     }}
                     className="w-full h-12 px-4 rounded-xl border border-slate-200 bg-white text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 appearance-none bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E')] bg-[length:18px_18px] bg-[right_14px_center] bg-no-repeat"
                   >
@@ -821,6 +962,18 @@ export function RequestWizard() {
                     onChange={(e) => {
                       setSelectedDistrict(e.target.value);
                       setIsGpsActive(false);
+                      setIsLocationResolved(false);
+                      setDetectedLocationName(null);
+                      setBanksList([]);
+                      setSelectedHospital({
+                        id: 'unselected-hospital',
+                        name: '',
+                        city: '',
+                        lat,
+                        lng,
+                        distanceKm: null,
+                        type: 'Government',
+                      });
                     }}
                     className="w-full h-12 px-4 rounded-xl border border-slate-200 bg-white text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 appearance-none bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E')] bg-[length:18px_18px] bg-[right_14px_center] bg-no-repeat"
                   >
@@ -852,10 +1005,13 @@ export function RequestWizard() {
             <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-white/95 backdrop-blur-md border-t border-slate-100 z-30">
               <Button
                 type="button"
-                onClick={() => goToStep('STEP_3_HOSPITAL')}
+                onClick={resolveManualLocation}
+                disabled={isLocating || !selectedDistrict}
                 className="w-full h-12 rounded-xl text-base font-semibold shadow-md bg-rose-500 hover:bg-rose-600 text-white active:scale-[0.99]"
               >
-                {isHi ? 'पुष्टि करें' : 'Confirm'}
+                {isLocating
+                  ? (isHi ? 'स्थान खोजा जा रहा है…' : 'Resolving location…')
+                  : (isHi ? 'स्थान की पुष्टि करें' : 'Confirm location')}
               </Button>
             </div>
 
@@ -1008,7 +1164,7 @@ export function RequestWizard() {
                       id: 'not-at-hospital',
                       name: isHi ? 'घर पर / ट्रांजिट में' : 'At Home / In Transit',
                       city: selectedDistrict,
-                      distanceKm: 0,
+                      distanceKm: null,
                       lat,
                       lng,
                       type: 'Private',
@@ -1053,7 +1209,7 @@ export function RequestWizard() {
                           id: `custom-${Date.now()}`,
                           name: hospitalSearch.trim(),
                           city: selectedDistrict,
-                          distanceKm: 1.0,
+                          distanceKm: null,
                           lat,
                           lng,
                           type: 'Private',
@@ -1101,7 +1257,9 @@ export function RequestWizard() {
                           <span>{hospital.city}</span>
                           <span>·</span>
                           <span className="font-semibold text-rose-600">
-                            {hospital.distanceKm} km
+                            {hospital.distanceKm !== null
+                              ? `${hospital.distanceKm.toFixed(1)} km`
+                              : (isHi ? 'दूरी उपलब्ध नहीं' : 'Distance unavailable')}
                           </span>
                           <span>·</span>
                           <span className="text-[11px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-600">
@@ -1143,7 +1301,7 @@ export function RequestWizard() {
                       id: 'skipped',
                       name: isHi ? 'अस्पताल निर्दिष्ट नहीं' : 'Hospital Not Specified',
                       city: selectedDistrict,
-                      distanceKm: 0,
+                      distanceKm: null,
                       lat,
                       lng,
                       type: 'Private',
@@ -1237,7 +1395,10 @@ export function RequestWizard() {
                   <button
                     key={r}
                     type="button"
-                    onClick={() => setRadiusKm(r)}
+                    onClick={() => {
+                      setRadiusKm(r);
+                      void fetchBloodBanks(r);
+                    }}
                     className={`px-5 py-1.5 rounded-full text-sm font-semibold transition-all ${
                       radiusKm === r
                         ? 'bg-rose-500 text-white shadow-sm'
@@ -1255,83 +1416,103 @@ export function RequestWizard() {
                   ? `${displayBanks.length} बैंक उपलब्ध (${selectedDistrict}, ${selectedState}) · ${selectedBloodGroup || 'AB+'} और संगत`
                   : `Showing ${displayBanks.length} Bank(s) in ${selectedDistrict}, ${selectedState} · ${selectedBloodGroup || 'AB+'} & Compatible`}
               </div>
+
+              {displayBanks.some((bank: any) => typeof bank.distanceKm !== 'number') && (
+                <p className="mx-auto mt-2 max-w-2xl text-center text-[11px] leading-relaxed text-amber-800">
+                  {isHi
+                    ? 'कुछ आधिकारिक स्टॉक रिकॉर्ड में बैंक के GPS निर्देशांक नहीं हैं। ऐसे रिकॉर्ड ज़िला-स्तर पर दिखाए जाते हैं; उनकी 25/50/100 किमी दूरी सत्यापित नहीं की जा सकती और वे मानचित्र पर नहीं दिखेंगे।'
+                    : 'Some official stock records do not include bank GPS coordinates. They are shown as district-level stock results; their 25/50/100 km distance cannot be verified and they will not appear as map pins.'}
+                </p>
+              )}
             </div>
 
             {/* Scrollable Blood Banks Cards List */}
             <div className="p-4 space-y-3 pb-28">
-              {displayBanks.map((bank: any, index: number) => {
-                const stockItems = bank.stock || [];
-                const matchingStock = stockItems.find((s: any) => s.bloodGroup === selectedBloodGroup);
-                const units = matchingStock ? matchingStock.unitsAvailable : (index === 0 ? 28 : index === 1 ? 14 : 9);
+              {banksError && <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{banksError}</p>}
+              {banksLoading && <p className="text-center text-sm text-slate-500">{isHi ? 'ब्लड बैंक खोजे जा रहे हैं…' : 'Searching blood banks…'}</p>}
+              {!banksLoading && !banksError && displayBanks.length === 0 && (
+                <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center">
+                  <Building2 className="mx-auto h-8 w-8 text-slate-300" />
+                  <p className="mt-2 text-sm font-semibold text-slate-700">{isHi ? 'इस क्षेत्र में कोई सत्यापित परिणाम नहीं मिला।' : 'No blood bank results were returned for this area.'}</p>
+                  <p className="mt-1 text-xs text-slate-500">{isHi ? 'दायरा बढ़ाकर फिर खोजें या रक्तदाता खोजें।' : 'Try a wider radius or continue to search for registered volunteer donors.'}</p>
+                </div>
+              )}
+              {displayBanks.map((bank: any) => {
+                const matchingStock = (bank.stock || []).filter((item: any) =>
+                  item.bloodGroup === selectedBloodGroup &&
+                  item.componentType === selectedComponent &&
+                  item.unitsAvailable > 0
+                );
+                const units = matchingStock.reduce((sum: number, item: any) => sum + item.unitsAvailable, 0);
+                const measuredDistance = typeof bank.distanceKm === 'number' && Number.isFinite(bank.distanceKm)
+                  ? `${bank.distanceKm.toFixed(1)} km`
+                  : (isHi ? 'दूरी उपलब्ध नहीं' : 'Distance unavailable');
                 const updatedTime = bank.lastStockUpdate
-                  ? bank.lastStockUpdate.includes('T') || bank.lastStockUpdate.includes('-')
-                    ? 'Updated today'
-                    : bank.lastStockUpdate
-                  : (index === 0 ? 'Updated 25m ago' : index === 1 ? 'Updated 1h ago' : 'Updated 3h ago');
-                const destLat = bank.latitude ?? bank.lat ?? lat;
-                const destLng = bank.longitude ?? bank.lng ?? lng;
-                const bankPhone = bank.phone || '+919876543210';
+                  ? new Date(bank.lastStockUpdate).toLocaleString(isHi ? 'hi-IN' : 'en-IN')
+                  : (isHi ? 'अपडेट समय उपलब्ध नहीं' : 'Update time unavailable');
+                const destLat = typeof bank.latitude === 'number' ? bank.latitude : null;
+                const destLng = typeof bank.longitude === 'number' ? bank.longitude : null;
+                const bankPhone = typeof bank.phone === 'string' && bank.phone.trim() ? bank.phone : null;
                 const bankLocation = bank.address || bank.city || `${selectedDistrict}, ${selectedState}`;
 
                 return (
                   <div
-                    key={bank.id || `bank-${index}`}
+                    key={bank.id}
                     className="p-4 rounded-2xl border border-slate-200 bg-white shadow-xs hover:border-slate-300 transition-all space-y-3"
                   >
                     <div>
-                      <h3 className="text-base font-bold text-slate-900 leading-snug">
-                        {bank.name}
-                      </h3>
+                      <h3 className="text-base font-bold text-slate-900 leading-snug">{bank.name}</h3>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        {bankLocation} · <span className="font-semibold text-rose-600">{bank.distanceKm} km</span>
+                        {bankLocation} · <span className="font-semibold text-rose-600">{measuredDistance}</span>
                       </p>
                     </div>
 
-                    {/* Badges & Stock Freshness */}
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-medium">
-                        {bank.type || 'Blood Bank'}
+                        {bank.source || 'Blood Bank'}
                       </span>
                       <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold">
-                        {units} units
+                        {units} {isHi ? 'यूनिट उपलब्ध' : 'units available'}
                       </span>
                       <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-semibold">
-                        {selectedBloodGroup || 'AB+'}
+                        {selectedBloodGroup || 'AB+'} · {selectedComponent}
                       </span>
-                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50/80 px-2 py-0.5 rounded-md">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
                         {updatedTime}
                       </span>
                     </div>
 
-                    {/* Actions Row: Share, Directions, Call */}
                     <div className="flex items-center gap-2 pt-1">
                       <button
                         type="button"
-                        onClick={() => handleShare(bank.name, `${bankLocation} (${bank.distanceKm} km)`)}
+                        onClick={() => handleShare(bank.name, `${bankLocation} · ${measuredDistance}`)}
                         className="w-11 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center text-slate-700 transition-colors shadow-xs"
                         aria-label="Share"
                       >
                         <Share2 className="w-4 h-4" />
                       </button>
 
-                      <a
-                        href={`https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="w-11 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center text-slate-700 transition-colors shadow-xs"
-                        aria-label="Directions"
-                      >
-                        <Navigation className="w-4 h-4" />
-                      </a>
+                      {destLat !== null && destLng !== null && (
+                        <a
+                          href={`https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-11 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center text-slate-700 transition-colors shadow-xs"
+                          aria-label="Directions"
+                        >
+                          <Navigation className="w-4 h-4" />
+                        </a>
+                      )}
 
-                      <a
-                        href={`tel:${bankPhone}`}
-                        className="flex-1 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center gap-2 text-slate-800 text-sm font-semibold transition-colors shadow-xs"
-                      >
-                        <Phone className="w-4 h-4 text-slate-700" />
-                        <span>{isHi ? 'कॉल करें' : 'Call'}</span>
-                      </a>
+                      {bankPhone && (
+                        <a
+                          href={`tel:${bankPhone}`}
+                          className="flex-1 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center gap-2 text-slate-800 text-sm font-semibold transition-colors shadow-xs"
+                        >
+                          <Phone className="w-4 h-4 text-slate-700" />
+                          <span>{isHi ? 'कॉल करें' : 'Call'}</span>
+                        </a>
+                      )}
                     </div>
                   </div>
                 );
@@ -1345,11 +1526,12 @@ export function RequestWizard() {
               </span>
               <Button
                 type="button"
-                onClick={() => goToStep('SCREEN_DONORS_FOUND')}
+                onClick={handleFindDonors}
+                disabled={donorLookupLoading || !isLocationResolved}
                 className="w-full h-12 rounded-xl text-base font-semibold shadow-md bg-rose-500 hover:bg-rose-600 text-white flex items-center justify-center gap-2 active:scale-[0.99]"
               >
-                <Radio className="w-5 h-5 animate-pulse" />
-                <span>{isHi ? 'अपने नज़दीक रक्तदाता खोजें' : 'Search Donors Near You'}</span>
+                {donorLookupLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Radio className="w-5 h-5 animate-pulse" />}
+                <span>{isHi ? 'अपने नज़दीक रक्तदाता खोजें' : 'Search eligible donors near you'}</span>
               </Button>
             </div>
           </div>
@@ -1362,72 +1544,55 @@ export function RequestWizard() {
           <div className="p-5 flex-1 flex flex-col justify-between">
             <div>
               <h1 className="text-2xl font-bold text-slate-900 tracking-tight leading-snug">
-                {isHi ? `हमें ${donorsCount} रक्तदाता मिले हैं` : `We found ${donorsCount} donors`}
+                {isHi ? 'आपके क्षेत्र में संगत रक्तदाता' : 'Compatible donors in your area'}
               </h1>
-              <p className="text-sm text-slate-500 mt-1 leading-relaxed">
+              <p className="mt-2 text-sm leading-relaxed text-slate-600">
                 {isHi
-                  ? `${radiusKm} किमी के भीतर पंजीकृत ${selectedBloodGroup || 'AB+'} और संगत रक्तदाता।`
-                  : `Registered ${selectedBloodGroup || 'AB+'} & compatible donors within ${radiusKm} km.`}
+                  ? `${radiusKm} किमी के भीतर उपलब्ध और इस डिवाइस पर सूचना चालू रखने वाले पंजीकृत रक्तदाताओं को ही अनुरोध भेजा जाएगा।`
+                  : `Only registered, available donors with push notifications enabled on their devices can receive this request within ${radiusKm} km.`}
               </p>
 
-              {/* Overlapping Avatar Stack */}
-              <div className="flex items-center -space-x-3 mt-4">
-                <img
-                  src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80"
-                  alt="Donor"
-                  className="w-12 h-12 rounded-full border-2 border-white object-cover shadow-sm"
-                />
-                <img
-                  src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&auto=format&fit=crop&q=80"
-                  alt="Donor"
-                  className="w-12 h-12 rounded-full border-2 border-white object-cover shadow-sm"
-                />
-                <div className="w-12 h-12 rounded-full border-2 border-white bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-600 shadow-sm">
-                  +12
-                </div>
-              </div>
-
-              {/* Verification Card */}
-              <div className="mt-8 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs flex items-center justify-between">
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">
-                    {isHi ? 'आप पहले से सत्यापित हैं' : "You're already verified"}
-                  </h3>
-                  <p className="text-sm text-slate-500 mt-0.5">
-                    {isHi ? `साइन इन नंबर: ${userPhone}` : `Signed in as ${userPhone}`}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const newP = prompt('Enter your phone number:', userPhone);
-                      if (newP) setUserPhone(newP);
-                    }}
-                    className="text-sm font-semibold text-rose-600 hover:text-rose-700 mt-2 block"
-                  >
-                    {isHi ? 'नंबर बदलें' : 'Change Number'}
-                  </button>
-                </div>
-
-                {/* Glowing Green Verification Badge */}
-                <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-inner">
-                  <CheckCircle2 className="w-8 h-8 fill-emerald-500 text-white" />
-                </div>
+              <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
+                {donorLookupLoading ? (
+                  <div className="flex items-center gap-3 text-sm text-slate-600">
+                    <Loader2 className="h-5 w-5 animate-spin text-rose-600" />
+                    {isHi ? 'पंजीकृत रक्तदाताओं की जाँच हो रही है…' : 'Checking registered, notification-enabled donors…'}
+                  </div>
+                ) : donorLookupError ? (
+                  <p role="alert" className="text-sm text-red-700">{donorLookupError}</p>
+                ) : donorsCount > 0 ? (
+                  <div className="flex items-start gap-3">
+                    <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-emerald-600" />
+                    <p className="text-sm text-slate-700">
+                      {isHi
+                        ? 'इस क्षेत्र में योग्य सूचना-सक्षम रक्तदाता उपलब्ध हैं। वास्तविक अनुरोध बनाते समय केवल मेल खाने वाले रक्तदाताओं को अलर्ट भेजा जाएगा।'
+                        : 'Eligible notification-enabled donor registrations are available in this area. When you send the request, the API will notify only the matching donors.'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="mt-0.5 h-6 w-6 shrink-0 text-amber-600" />
+                    <p className="text-sm text-slate-700">
+                      {isHi
+                        ? 'अभी इस क्षेत्र में सक्रिय सूचना-सदस्यता वाला कोई संगत रक्तदाता नहीं मिला। आप फिर भी अनुरोध बना सकते हैं; कोई झूठा अलर्ट नहीं दिखाया जाएगा।'
+                        : 'No compatible donor with an active push subscription was found in this area right now. You can still create the request; the system will not show or message demo donors.'}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Bottom Continue Action */}
-            <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-white/95 backdrop-blur-md border-t border-slate-100 z-30">
+            <div className="fixed bottom-0 left-0 right-0 z-30 mx-auto max-w-md border-t border-slate-100 bg-white/95 p-4 backdrop-blur-md">
               <Button
                 type="button"
                 onClick={() => goToStep('STEP_4_PATIENT_DETAILS')}
-                className="w-full h-12 rounded-xl text-base font-semibold shadow-md bg-rose-500 hover:bg-rose-600 text-white active:scale-[0.99]"
+                className="h-12 w-full rounded-xl bg-rose-500 text-base font-semibold text-white shadow-md hover:bg-rose-600"
               >
-                {isHi ? 'अभी जारी रखें' : 'Continue now'}
+                {isHi ? 'आगे बढ़ें' : 'Continue'}
               </Button>
             </div>
           </div>
         )}
-
         {/* ========================================================================= */}
         {/* STEP 4: PATIENT DETAILS (Matching Reference Screen 9) */}
         {/* ========================================================================= */}
@@ -1661,14 +1826,15 @@ export function RequestWizard() {
               </div>
             </div>
 
-            {/* Bottom Send to Donors Action */}
+            {requestError && <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800">{requestError}</p>}
+            {/* Send the actual request; donor matching and notification delivery are handled by the API. */}
             <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-white/95 backdrop-blur-md border-t border-slate-100 z-30">
               <Button
                 type="button"
                 onClick={handleSendRequest}
                 className="w-full h-12 rounded-xl text-base font-semibold shadow-md bg-rose-500 hover:bg-rose-600 text-white active:scale-[0.99]"
               >
-                {isHi ? `${donorsCount} रक्तदाताओं को भेजें` : `Send to ${donorsCount} donors`}
+                {isHi ? 'आपातकालीन अनुरोध भेजें' : 'Send emergency request'}
               </Button>
             </div>
           </div>
@@ -1689,8 +1855,8 @@ export function RequestWizard() {
             </h2>
             <p className="text-sm text-slate-500 mt-2">
               {isHi
-                ? `आपके नज़दीक ${donorsCount} रक्तदाता(ओं) को सूचित किया जा रहा है...`
-                : `Notifying ${donorsCount} donor(s) near you...`}
+                ? 'योग्य रक्तदाताओं को सुरक्षित पुश सूचना भेजी जा रही है…'
+                : 'Sending push notifications to eligible registered donors…'}
             </p>
           </div>
         )}
@@ -1699,116 +1865,17 @@ export function RequestWizard() {
         {/* REQUEST SENT / WAITING ROOM (Matching Reference Screen 13) */}
         {/* ========================================================================= */}
         {currentStep === 'SCREEN_WAITING_ROOM' && (
-          <div className="flex-1 flex flex-col">
-            {/* Top Accepted Count Pill over Mini Map Banner */}
-            <div className="relative bg-slate-100 h-24 flex items-center justify-center border-b border-slate-200/80">
-              <div className="px-5 py-2 rounded-full bg-white shadow-md border border-slate-200 text-sm font-bold text-slate-900">
-                {isHi
-                  ? `${acceptedCount} / ${targetCount} ने स्वीकार किया`
-                  : `${acceptedCount} of ${targetCount} accepted`}
+          <div className="flex-1 p-4">
+            {createdRequestId ? (
+              <WaitingRoom
+                requestId={createdRequestId}
+                requestCloseToken={requestCloseToken}
+              />
+            ) : (
+              <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-5 text-center text-sm text-red-800">
+                {isHi ? 'अनुरोध आईडी प्राप्त नहीं हुई। कृपया दोबारा प्रयास करें।' : 'No request was created. Please return and try again.'}
               </div>
-            </div>
-
-            {/* Donors who have accepted section */}
-            <div className="p-5 flex-1 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-                    {isHi ? 'जिन्होंने स्वीकार किया है' : "Donors who've accepted"}
-                  </h2>
-                  <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-bold">
-                    {acceptedCount}/{targetCount}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {selectedBloodGroup || 'AB+'} and compatible types
-                </p>
-
-                {/* Accepted Donors Cards */}
-                <div className="mt-5 space-y-3">
-                  {acceptedDonors.map((donor) => (
-                    <div
-                      key={donor.id}
-                      className="p-4 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3"
-                    >
-                      <div className="flex items-center gap-3">
-                        {/* Avatar with Verified Badge Overlay */}
-                        <div className="relative">
-                          <img
-                            src={donor.avatarUrl}
-                            alt={donor.name}
-                            className="w-12 h-12 rounded-full object-cover border border-slate-200"
-                          />
-                          <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-slate-900 border-2 border-white flex items-center justify-center text-white">
-                            <Check className="w-3 h-3 stroke-[3]" />
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-base font-bold text-slate-900">
-                              {donor.name}
-                            </span>
-                            <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-bold">
-                              {donor.bloodGroup}
-                            </span>
-                          </div>
-                          <div className="text-xs text-slate-500 mt-0.5">
-                            {donor.distanceKm} km away · {donor.gender}, {donor.age}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Action Buttons: Share, Call, WhatsApp */}
-                      <div className="flex items-center gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => handleShare(donor.name, `Blood Donor (${donor.bloodGroup})`)}
-                          className="w-11 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center text-slate-700 transition-colors shadow-xs"
-                          aria-label="Share"
-                        >
-                          <Share2 className="w-4 h-4" />
-                        </button>
-
-                        <a
-                          href={`tel:${donor.phone}`}
-                          className="flex-1 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center gap-2 text-slate-800 text-sm font-semibold transition-colors shadow-xs"
-                        >
-                          <Phone className="w-4 h-4 text-slate-700" />
-                          <span>{isHi ? 'कॉल करें' : 'Call'}</span>
-                        </a>
-
-                        <a
-                          href={`https://wa.me/${donor.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                            isHi
-                              ? `नमस्ते ${donor.name}, रक्तखोज पर रक्त दान अनुरोध स्वीकार करने के लिए धन्यवाद!`
-                              : `Hello ${donor.name}, thank you for accepting the blood donation request on RaktKhoj!`
-                          )}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex-1 h-11 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white flex items-center justify-center gap-2 text-sm font-bold transition-colors shadow-xs"
-                        >
-                          <MessageCircle className="w-4 h-4 fill-white text-[#25D366]" />
-                          <span>WhatsApp</span>
-                        </a>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Waiting for more pulsing footer */}
-              <div className="mt-8 text-center pb-6">
-                <div className="inline-flex items-center gap-1.5 text-rose-500 mb-2">
-                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-dot-1"></span>
-                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-dot-2"></span>
-                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-dot-3"></span>
-                </div>
-                <div className="text-sm font-medium text-slate-500">
-                  {isHi ? 'और रक्तदाताओं की प्रतीक्षा है, कृपया धैर्य रखें' : 'Waiting for more, please be patient'}
-                </div>
-              </div>
-            </div>
+            )}
           </div>
         )}
 

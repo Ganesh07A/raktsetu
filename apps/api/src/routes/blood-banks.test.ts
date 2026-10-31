@@ -1,10 +1,13 @@
 import { describe, expect, it, beforeEach } from 'bun:test';
 import { app } from '../index';
 import { mockStore } from '../services/mock-store';
+import { eraktkoshProxy } from '../services/eraktkosh-proxy';
 
 describe('Blood Banks API Routes (/api/v1/blood-banks)', () => {
   beforeEach(() => {
+    process.env.NODE_ENV = 'test';
     mockStore.reset();
+    eraktkoshProxy.clearCache();
   });
 
   describe('GET /search', () => {
@@ -47,7 +50,12 @@ describe('Blood Banks API Routes (/api/v1/blood-banks)', () => {
       expect(res.status).toBe(200);
 
       const json = (await res.json()) as {
-        banks: Array<{ name: string; distanceKm: number; licenseNumber: string }>;
+        banks: Array<{
+          name: string;
+          distanceKm: number;
+          licenseNumber: string;
+          stock: Array<{ unitsAvailable: number }>;
+        }>;
         totalCount: number;
         source: string;
       };
@@ -60,9 +68,18 @@ describe('Blood Banks API Routes (/api/v1/blood-banks)', () => {
       expect(names.some((n) => n.includes('AIIMS'))).toBe(true);
       expect(names.some((n) => n.includes('Safdarjung'))).toBe(true);
 
-      // Verify sorted by distance
+      // Matching stock is prioritized first; within each stock group, sort by distance.
       for (let i = 0; i < json.banks.length - 1; i++) {
-        expect(json.banks[i]!.distanceKm).toBeLessThanOrEqual(json.banks[i + 1]!.distanceKm);
+        const current = json.banks[i]!;
+        const next = json.banks[i + 1]!;
+        const currentHasStock = current.stock.some((item: { unitsAvailable: number }) => item.unitsAvailable > 0);
+        const nextHasStock = next.stock.some((item: { unitsAvailable: number }) => item.unitsAvailable > 0);
+
+        if (currentHasStock !== nextHasStock) {
+          expect(currentHasStock).toBe(true);
+        } else {
+          expect(current.distanceKm).toBeLessThanOrEqual(next.distanceKm);
+        }
       }
     });
 

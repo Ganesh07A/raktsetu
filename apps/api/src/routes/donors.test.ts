@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach } from 'bun:test';
 import { app } from '../index';
 import { mockStore } from '../services/mock-store';
+import { createDonorSessionToken } from '../services/donor-session';
 
 describe('Donor Routes (/api/v1/donors)', () => {
   beforeEach(() => {
@@ -17,10 +18,10 @@ describe('Donor Routes (/api/v1/donors)', () => {
         longitude: 77.21,
         state: 'Delhi',
         district: 'South Delhi',
-        whatsappConsent: true,
         gender: 'male',
         weightKg: 70,
         preferredLanguage: 'hi',
+        searchRadiusKm: 25,
       };
 
       const res = await app.request('/api/v1/donors/register', {
@@ -47,7 +48,50 @@ describe('Donor Routes (/api/v1/donors)', () => {
       expect((stored as any).name).toBe('Karan Johar');
     });
 
-    it('rejects registration without mandatory WhatsApp consent', async () => {
+    it('returns the newly registered profile radius and an empty activity history', async () => {
+      const registerResponse = await app.request('/api/v1/donors/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'New Radius Donor',
+          phone: '+919899001155',
+          bloodGroup: 'AB+',
+          latitude: 19.8762,
+          longitude: 75.3433,
+          state: 'Maharashtra',
+          district: 'Chhatrapati Sambhajinagar',
+          searchRadiusKm: 25,
+        }),
+      });
+
+      expect(registerResponse.status).toBe(201);
+      const registered = await registerResponse.json() as {
+        donor: { id: string };
+        token: string;
+      };
+
+      const profileResponse = await app.request(
+        `/api/v1/donors/profile/${registered.donor.id}`,
+        { headers: { Authorization: `Bearer ${registered.token}` } }
+      );
+      expect(profileResponse.status).toBe(200);
+
+      const profileData = await profileResponse.json() as {
+        profile: { searchRadiusKm: number };
+        acceptedRequests: unknown[];
+        confirmedDonationsCount: number;
+      };
+      expect(profileData.profile.searchRadiusKm).toBe(25);
+      expect(profileData.acceptedRequests).toEqual([]);
+      expect(profileData.confirmedDonationsCount).toBe(0);
+    });
+
+    it('does not expose a donor profile without its matching signed session', async () => {
+      const response = await app.request('/api/v1/donors/profile/donor-rahul-a-pos');
+      expect(response.status).toBe(401);
+    });
+
+    it('registers a donor without requiring browser notification permission at sign-up', async () => {
       const payload = {
         name: 'Amitabh Sen',
         phone: '+919899001133',
@@ -56,18 +100,16 @@ describe('Donor Routes (/api/v1/donors)', () => {
         longitude: 77.21,
         state: 'Delhi',
         district: 'South Delhi',
-        whatsappConsent: false, // Refused consent
       };
-
       const res = await app.request('/api/v1/donors/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-
-      expect(res.status).toBe(400);
-      const json = (await res.json()) as { error: string };
-      expect(json.error).toContain('Consent to receive WhatsApp notifications is required');
+      expect(res.status).toBe(201);
+      const json = (await res.json()) as { success: boolean; token: string };
+      expect(json.success).toBe(true);
+      expect(json.token).toBeDefined();
     });
 
     it('rejects registration with invalid Indian phone number', async () => {
@@ -79,7 +121,6 @@ describe('Donor Routes (/api/v1/donors)', () => {
         longitude: 77.21,
         state: 'Delhi',
         district: 'South Delhi',
-        whatsappConsent: true,
       };
 
       const res = await app.request('/api/v1/donors/register', {
@@ -102,7 +143,6 @@ describe('Donor Routes (/api/v1/donors)', () => {
         longitude: 77.21,
         state: 'Delhi',
         district: 'South Delhi',
-        whatsappConsent: true,
       };
 
       const res = await app.request('/api/v1/donors/register', {
@@ -125,7 +165,6 @@ describe('Donor Routes (/api/v1/donors)', () => {
         longitude: 77.21,
         state: 'Delhi',
         district: 'South Delhi',
-        whatsappConsent: true,
       };
 
       const res = await app.request('/api/v1/donors/register', {
@@ -148,7 +187,6 @@ describe('Donor Routes (/api/v1/donors)', () => {
         longitude: 77.21,
         state: 'Delhi',
         district: 'South Delhi',
-        whatsappConsent: true,
       };
 
       const res = await app.request('/api/v1/donors/register', {
@@ -216,7 +254,10 @@ describe('Donor Routes (/api/v1/donors)', () => {
         '/api/v1/donors/profile/donor-rahul-a-pos/availability',
         {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${createDonorSessionToken('donor-rahul-a-pos')}`,
+          },
           body: JSON.stringify({ isAvailable: false }),
         }
       );

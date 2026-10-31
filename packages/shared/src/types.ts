@@ -52,7 +52,6 @@ export interface DonorProfile {
   lastDonationDate: string | null;
   isAvailable: boolean;
   searchRadiusKm: number;
-  whatsappConsent: boolean;
   createdAt: Date | string;
   updatedAt: Date | string;
 }
@@ -82,7 +81,7 @@ export interface DonorNotification {
   id: string;
   requestId: string;
   donorId: string;
-  whatsappMessageId: string | null;
+  pushMessageId: string | null;
   status: NotificationStatus;
   sentAt: Date | string | null;
   respondedAt: Date | string | null;
@@ -137,7 +136,7 @@ export interface BloodBankCardData {
   email?: string | null;
   latitude: number | null;
   longitude: number | null;
-  distanceKm: number;
+  distanceKm: number | null;
   stock: StockItem[];
   isVerified: boolean;
   source: BloodBankSource;
@@ -152,7 +151,6 @@ export interface AcceptedDonorContact {
   distanceKm: number;
   respondedAt: string;
   directCallUrl?: string;
-  whatsappUrl?: string;
 }
 
 export interface DonorNotificationSummary {
@@ -192,7 +190,6 @@ export interface DonorRegistrationInput {
   lastDonationDate?: string;
   isAvailable?: boolean;
   searchRadiusKm?: number;
-  whatsappConsent: boolean;
   preferredLanguage?: SupportedLanguage;
 }
 

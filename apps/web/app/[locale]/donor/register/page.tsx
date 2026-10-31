@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { useLocale } from 'next-intl';
+import { PushNotificationOptIn } from '../../../components/push-notification-opt-in';
 import { Link, useRouter } from '../../../../src/routing';
 import { Button } from '@repo/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@repo/ui/card';
@@ -19,8 +20,6 @@ import {
   ArrowLeft,
   Sparkles,
   HeartHandshake,
-  MessageSquare,
-  Lock,
   Calendar,
   User,
   Scale,
@@ -36,7 +35,7 @@ const STEPS_EN: StepItem[] = [
   { title: 'Personal Info', description: 'Name & Age' },
   { title: 'Blood Group', description: 'ABO/Rh' },
   { title: 'Location', description: 'GPS or District' },
-  { title: 'Consent', description: 'WhatsApp Alerts' },
+  { title: 'Notifications', description: 'Push Alerts' },
 ];
 
 const STEPS_HI: StepItem[] = [
@@ -44,7 +43,7 @@ const STEPS_HI: StepItem[] = [
   { title: 'व्यक्तिगत विवरण', description: 'नाम एवं आयु' },
   { title: 'रक्त समूह', description: 'ABO/Rh' },
   { title: 'स्थान', description: 'जीपीएस या जिला' },
-  { title: 'सहमति', description: 'व्हाट्सएप अलर्ट' },
+  { title: 'सूचनाएं', description: 'पुश अलर्ट' },
 ];
 
 export default function DonorRegistrationPage() {
@@ -82,7 +81,6 @@ export default function DonorRegistrationPage() {
   const [gpsLoading, setGpsLoading] = React.useState<boolean>(false);
 
   // Consent & Availability
-  const [whatsappConsent, setWhatsappConsent] = React.useState<boolean>(true);
   const [isAvailable, setIsAvailable] = React.useState<boolean>(true);
 
   // Submission State
@@ -140,15 +138,6 @@ export default function DonorRegistrationPage() {
   // Final Submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!whatsappConsent) {
-      setSubmitError(
-        isHi
-          ? 'रक्तदाता पंजीकरण के लिए व्हाट्सएप सूचनाओं की सहमति आवश्यक है'
-          : 'Consent to receive WhatsApp notifications is required'
-      );
-      return;
-    }
-
     setSubmitting(true);
     setSubmitError(null);
 
@@ -164,7 +153,6 @@ export default function DonorRegistrationPage() {
       weightKg: Number(weightKg),
       dateOfBirth,
       lastDonationDate: lastDonationDate || null,
-      whatsappConsent: true,
       isAvailable,
       searchRadiusKm,
       preferredLanguage: locale as 'en' | 'hi',
@@ -215,10 +203,12 @@ export default function DonorRegistrationPage() {
           </h1>
           <p className="text-sm text-slate-600 max-w-md mx-auto">
             {isHi
-              ? 'आपका प्रोफाइल सफलतापूर्वक पंजीकृत हो गया है। जब भी आपके निकट किसी मरीज को आपके रक्त समूह की आवश्यकता होगी, आपको व्हाट्सएप पर सूचित किया जाएगा।'
-              : 'Your donor profile is active. You will receive WhatsApp notifications whenever patients near you are in urgent need.'}
+              ? 'आपका प्रोफाइल सफलतापूर्वक पंजीकृत हो गया है। नजदीकी रक्त अनुरोधों के लिए इस डिवाइस पर सूचनाएं चालू करें।'
+              : 'Your donor profile is active. Enable notifications on this device to receive nearby blood requests.'}
           </p>
         </div>
+
+        <PushNotificationOptIn />
 
         {/* Digital Donor ID Card */}
         <div className="rounded-2xl border-2 border-red-200 bg-gradient-to-br from-red-600 via-red-700 to-red-900 text-white p-6 shadow-xl text-left space-y-4">
@@ -293,7 +283,7 @@ export default function DonorRegistrationPage() {
         <p className="text-xs sm:text-sm text-slate-600 max-w-lg mx-auto">
           {isHi
             ? 'केवल 2 मिनट में पंजीकरण करें। आपका एक रक्तदान किसी परिवार के चिराग को बुझने से बचा सकता है।'
-            : 'Takes just 2 minutes. Receive WhatsApp notifications only when nearby patients need your blood.'}
+            : 'Takes just 2 minutes. Register to help nearby patients who need your blood group.'}
         </p>
       </div>
 
@@ -318,8 +308,8 @@ export default function DonorRegistrationPage() {
                 </h3>
                 <p className="text-xs text-slate-500">
                   {isHi
-                    ? 'आपातकालीन व्हाट्सएप सूचनाएं प्राप्त करने के लिए अपना 10 अंकों का सक्रिय मोबाइल नंबर दर्ज करें'
-                    : 'Enter your 10-digit mobile number for WhatsApp emergency notifications'}
+                    ? 'अपना 10 अंकों का सक्रिय मोबाइल नंबर दर्ज करें'
+                    : 'Enter your 10-digit mobile number to create your donor profile'}
                 </p>
               </div>
 
@@ -656,7 +646,7 @@ export default function DonorRegistrationPage() {
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-1">
                 <h3 className="text-base font-bold text-slate-900">
-                  {isHi ? 'चरण 5: व्हाट्सएप सूचना सहमति एवं उपलब्धता' : 'Step 5: WhatsApp Consent & Availability'}
+                  {isHi ? 'चरण 5: सूचनाएं एवं उपलब्धता' : 'Step 5: Notifications & Availability'}
                 </h3>
                 <p className="text-xs text-slate-500">
                   {isHi
@@ -664,22 +654,9 @@ export default function DonorRegistrationPage() {
                     : 'Final confirmation to receive urgent blood request notifications'}
                 </p>
               </div>
-
-              {/* Consent Checkbox */}
-              <div className="p-4 rounded-xl border border-red-200 bg-red-50/50 space-y-3">
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={whatsappConsent}
-                    onChange={(e) => setWhatsappConsent(e.target.checked)}
-                    className="mt-1 h-4 w-4 rounded border-slate-300 text-red-600 focus:ring-red-500"
-                  />
-                  <span className="text-xs text-slate-800 leading-relaxed font-medium">
-                    {isHi
-                      ? 'मैं आपातकालीन परिस्थितियों में मरीज के परिजनों द्वारा रक्त अनुरोध भेजे जाने पर व्हाट्सएप पर तत्काल संदेश और इंटरैक्टिव बटन प्राप्त करने की सहमति देता/देती हूँ।'
-                      : 'I agree to receive emergency blood alert notifications via WhatsApp with interactive Accept/Decline quick response buttons when patients nearby require my blood group.'}
-                  </span>
-                </label>
+              <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/70 space-y-2">
+                <p className="text-sm font-bold text-emerald-900">{isHi ? 'आपातकालीन पुश सूचनाएं' : 'Emergency push notifications'}</p>
+                <p className="text-xs leading-relaxed text-emerald-900/80">{isHi ? 'पंजीकरण के बाद आप इस डिवाइस पर सूचनाएं चालू कर सकते हैं। अनुमति वैकल्पिक है और कभी भी बदली जा सकती है।' : 'After registration, you can enable browser notifications on this device. Permission is optional and can be changed at any time.'}</p>
               </div>
 
               {/* Availability Toggle */}
@@ -714,7 +691,6 @@ export default function DonorRegistrationPage() {
                 <Button
                   type="submit"
                   loading={submitting}
-                  disabled={!whatsappConsent}
                   className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
                 >
                   <Sparkles className="h-4 w-4 mr-1.5" />

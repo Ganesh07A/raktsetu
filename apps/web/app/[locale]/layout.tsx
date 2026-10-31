@@ -4,6 +4,7 @@ import { getMessages } from 'next-intl/server';
 import { notFound } from 'next/navigation';
 import { routing, Link } from '../../src/routing';
 import { RegisterServiceWorker } from '../components/register-sw';
+import { ForegroundPushListener } from '../components/foreground-push-listener';
 import { LanguageSwitcher } from '../components/language-switcher';
 import '../globals.css';
 import { HeartPulse, PhoneCall, ShieldAlert, Droplet } from 'lucide-react';
@@ -54,6 +55,7 @@ export default async function LocaleLayout({
         <NextIntlClientProvider messages={messages}>
           {/* PWA Service Worker Registration */}
           <RegisterServiceWorker />
+          <ForegroundPushListener />
 
           {/* Top Emergency Helpline Ticker */}
           <aside

@@ -2,493 +2,238 @@
 
 import * as React from 'react';
 import { useLocale } from 'next-intl';
-import { Link } from '../src/routing';
-import { Button } from '@repo/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@repo/ui/card';
 import { Badge } from '@repo/ui/badge';
+import { Button } from '@repo/ui/button';
 import {
   Clock,
   CheckCircle2,
   PhoneCall,
-  MessageSquare,
   AlertCircle,
-  Copy,
-  ExternalLink,
-  Users,
-  ShieldCheck,
-  Send,
-  Droplet,
   HeartHandshake,
-  Check,
-  Sparkles,
+  XCircle,
+  Loader2,
 } from 'lucide-react';
-import type {
-  BloodRequest,
-  DonorNotificationSummary,
-  AcceptedDonorContact,
-} from '@repo/shared';
+import type { BloodRequest, AcceptedDonorContact, DonorNotificationSummary } from '@repo/shared';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3002';
+
+type WaitingRoomNotification = Pick<DonorNotificationSummary, 'id' | 'status' | 'sentAt' | 'respondedAt'>;
 
 export interface WaitingRoomProps {
   requestId: string;
+  requestCloseToken?: string | null;
   initialData?: {
     request: BloodRequest;
-    notifications: (DonorNotificationSummary & {
-      donorName?: string;
-      donorBloodGroup?: string;
-      donorPhoneMasked?: string;
-    })[];
-    acceptedDonors: (AcceptedDonorContact & {
-      directCallUrl?: string;
-      whatsappUrl?: string;
-    })[];
+    notifications: WaitingRoomNotification[];
+    acceptedDonors: AcceptedDonorContact[];
   };
 }
 
-export function WaitingRoom({ requestId, initialData }: WaitingRoomProps) {
+export function WaitingRoom({ requestId, requestCloseToken, initialData }: WaitingRoomProps) {
   const locale = useLocale();
   const isHi = locale === 'hi';
 
-  const [request, setRequest] = React.useState<BloodRequest | null>(
-    initialData?.request || null
-  );
-  const [notifications, setNotifications] = React.useState<any[]>(
-    initialData?.notifications || []
-  );
-  const [acceptedDonors, setAcceptedDonors] = React.useState<any[]>(
-    initialData?.acceptedDonors || []
-  );
+  const [request, setRequest] = React.useState<BloodRequest | null>(initialData?.request || null);
+  const [notifications, setNotifications] = React.useState<WaitingRoomNotification[]>(initialData?.notifications || []);
+  const [acceptedDonors, setAcceptedDonors] = React.useState<AcceptedDonorContact[]>(initialData?.acceptedDonors || []);
   const [loading, setLoading] = React.useState(!initialData);
-  const [copied, setCopied] = React.useState(false);
-  const [simulating, setSimulating] = React.useState(false);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [closing, setClosing] = React.useState(false);
+  const [closeError, setCloseError] = React.useState<string | null>(null);
 
-  // Polling engine: Queries GET /api/v1/requests/:id every 3 seconds
   React.useEffect(() => {
-    let isMounted = true;
+    let active = true;
+    let interval: ReturnType<typeof setInterval> | undefined;
 
-    async function pollRequestStatus() {
+    const poll = async () => {
       try {
-        const res = await fetch(`http://localhost:3002/api/v1/requests/${requestId}`, {
+        const response = await fetch(`${API_BASE}/api/v1/requests/${encodeURIComponent(requestId)}`, {
           cache: 'no-store',
         });
-        if (res.ok) {
-          const data = await res.json();
-          if (isMounted) {
-            if (data.request) setRequest(data.request);
-            if (data.notifications) setNotifications(data.notifications);
-            if (data.acceptedDonors) setAcceptedDonors(data.acceptedDonors);
-            setLoading(false);
-          }
-        }
-      } catch (err) {
-        console.error('Waiting room polling error:', err);
-      }
-    }
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Unable to load request status.');
 
-    pollRequestStatus();
-    const interval = setInterval(pollRequestStatus, 3000);
+        if (!active) return;
+        setRequest(data.request || null);
+        setNotifications(Array.isArray(data.notifications) ? data.notifications : []);
+        setAcceptedDonors(Array.isArray(data.acceptedDonors) ? data.acceptedDonors : []);
+        setLoadError(null);
+        setLoading(false);
+
+        const status = data.request?.status;
+        if (['fulfilled', 'cancelled', 'expired'].includes(status)) {
+          if (interval) clearInterval(interval);
+        }
+      } catch (error) {
+        if (!active) return;
+        setLoadError(error instanceof Error ? error.message : 'Unable to refresh request status.');
+        setLoading(false);
+      }
+    };
+
+    void poll();
+    interval = setInterval(() => { void poll(); }, 3000);
 
     return () => {
-      isMounted = false;
-      clearInterval(interval);
+      active = false;
+      if (interval) clearInterval(interval);
     };
   }, [requestId]);
 
-  // Derived metrics
-  const sentCount = notifications.length;
-  const deliveredCount = notifications.filter((n) =>
-    ['delivered', 'read', 'accepted'].includes(n.status)
-  ).length;
-  const acceptedCount =
-    acceptedDonors.length ||
-    notifications.filter((n) => n.status === 'accepted').length;
+  const isFulfilled = request?.status === 'fulfilled' || acceptedDonors.length > 0;
+  const hasBankStock = request?.status === 'bank_found';
+  const isClosed = request?.status === 'cancelled' || request?.status === 'expired';
+  const pushSent = notifications.some((item) =>
+    ['sent', 'delivered', 'read', 'accepted'].includes(item.status)
+  );
+  const allFailed = notifications.length > 0 && notifications.every((item) => item.status === 'failed');
 
-  const isFulfilled =
-    request?.status === 'fulfilled' || acceptedDonors.length > 0;
-
-  // Donor direct respond URL for deep-linking
-  const respondUrl =
-    typeof window !== 'undefined'
-      ? `${window.location.origin}/${locale}/donor/respond/${requestId}`
-      : `/donor/respond/${requestId}`;
-
-  const handleCopyLink = () => {
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      navigator.clipboard.writeText(respondUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  // Instant simulator action for testing acceptance
-  const handleSimulateAccept = async () => {
-    setSimulating(true);
+  const handleCloseSearch = async () => {
+    if (!requestCloseToken || closing || isFulfilled || isClosed) return;
+    setClosing(true);
+    setCloseError(null);
     try {
-      const firstNotif = notifications[0];
-      await fetch(`http://localhost:3002/api/v1/requests/${requestId}/respond`, {
+      const response = await fetch(`${API_BASE}/api/v1/requests/${encodeURIComponent(requestId)}/close`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: 'accepted',
-          donorId: firstNotif?.donorId,
-          responseNote: 'Ready to donate immediately',
-        }),
+        body: JSON.stringify({ requestCloseToken }),
       });
-
-      // Trigger immediate poll
-      const res = await fetch(`http://localhost:3002/api/v1/requests/${requestId}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.request) setRequest(data.request);
-        if (data.notifications) setNotifications(data.notifications);
-        if (data.acceptedDonors) setAcceptedDonors(data.acceptedDonors);
-      }
-    } catch (err) {
-      console.error(err);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Unable to close this search.');
+      setRequest((current) => current ? { ...current, status: 'cancelled', fulfillmentSource: null } : current);
+    } catch (error) {
+      setCloseError(error instanceof Error ? error.message : 'Unable to close this search.');
     } finally {
-      setSimulating(false);
+      setClosing(false);
     }
   };
 
   if (loading && !request) {
     return (
-      <div className="space-y-4 max-w-3xl mx-auto p-6 text-center">
-        <div className="w-12 h-12 rounded-full border-4 border-red-600 border-t-transparent animate-spin mx-auto"></div>
-        <p className="text-sm font-semibold text-slate-700">
-          {isHi ? 'लाइव वेटिंग रूम लोड हो रहा है...' : 'Connecting to Live Waiting Room...'}
+      <div className="mx-auto max-w-3xl p-6 text-center">
+        <Loader2 className="mx-auto h-9 w-9 animate-spin text-red-600" />
+        <p className="mt-3 text-sm font-semibold text-slate-700">
+          {isHi ? 'लाइव अनुरोध स्थिति लोड हो रही है…' : 'Loading live request status…'}
         </p>
       </div>
     );
   }
 
+  if (!request) {
+    return (
+      <div className="mx-auto max-w-2xl rounded-xl border border-red-200 bg-red-50 p-5 text-center">
+        <AlertCircle className="mx-auto h-7 w-7 text-red-700" />
+        <p role="alert" className="mt-2 text-sm text-red-800">{loadError || 'Request not found.'}</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      {/* Live Emergency Status Header Card */}
-      <div
-        className={`rounded-2xl p-6 sm:p-8 text-white shadow-lg transition-all ${
-          isFulfilled
-            ? 'bg-gradient-to-br from-emerald-600 via-emerald-700 to-teal-900 border-2 border-emerald-400'
-            : 'bg-gradient-to-br from-red-600 via-red-700 to-red-900 border-2 border-red-400'
-        }`}
-      >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 backdrop-blur-xs text-xs font-bold">
-                <span className="w-2 h-2 rounded-full bg-emerald-300 animate-ping"></span>
-                {isHi ? 'वास्तविक समय लाइव ट्रैकिंग' : 'Live Real-Time Status'}
-              </span>
-              <span className="text-xs text-red-100 font-mono">#{requestId}</span>
-            </div>
-
-            <h1 className="text-2xl sm:text-4xl font-black tracking-tight">
-              {request?.patientName} — {request?.bloodGroupNeeded}
-            </h1>
-
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs sm:text-sm text-red-100">
-              <span className="flex items-center gap-1">
-                <strong>{isHi ? 'अस्पताल:' : 'Hospital:'}</strong> {request?.hospitalName}
-              </span>
-              <span>•</span>
-              <span className="flex items-center gap-1">
-                <strong>{isHi ? 'आवश्यकता:' : 'Units:'}</strong> {request?.unitsNeeded} Unit(s) ({request?.componentType})
-              </span>
-            </div>
+    <div className="mx-auto max-w-3xl space-y-5 p-4 sm:p-6">
+      <Card className={isFulfilled ? 'border-emerald-300 bg-emerald-50/50' : isClosed ? 'border-slate-300 bg-slate-50' : 'border-red-200'}>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-3">
+            <Badge variant={isFulfilled || hasBankStock ? 'success' : 'outline'}>
+              {hasBankStock
+                ? (isHi ? 'ब्लड बैंक स्टॉक उपलब्ध' : 'Blood bank stock found')
+                : isFulfilled
+                  ? (isHi ? 'दाता ने अनुरोध स्वीकार किया' : 'Donor accepted')
+                  : isClosed
+                  ? (isHi ? 'खोज बंद' : 'Search closed')
+                  : (isHi ? 'प्रतिक्रिया की प्रतीक्षा' : 'Waiting for responses')}
+            </Badge>
+            <span className="text-[11px] text-slate-500 font-mono">#{requestId}</span>
           </div>
-
-          <div className="flex sm:flex-col items-center sm:items-end justify-between gap-2 border-t sm:border-t-0 pt-3 sm:pt-0 border-white/20">
-            <div className="w-16 h-16 rounded-2xl bg-white text-slate-900 flex items-center justify-center font-black text-2xl shadow-md">
-              {request?.bloodGroupNeeded}
+          <CardTitle className="pt-2 text-xl">{request.patientName} · {request.bloodGroupNeeded}</CardTitle>
+          <CardDescription>
+            {request.hospitalName} · {request.unitsNeeded} {isHi ? 'यूनिट' : 'unit(s)'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {hasBankStock ? (
+            <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-white p-3 text-sm text-emerald-900">
+              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
+              <p>{isHi ? 'चुने गए दायरे में ब्लड बैंक स्टॉक मिला। इसलिए रक्तदाता पुश अलर्ट भेजने की आवश्यकता नहीं पड़ी।' : 'Blood bank stock was found for this request, so no donor push alerts were needed.'}</p>
             </div>
-            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-white/20">
-              {isFulfilled
-                ? isHi ? '✓ रक्तदाता स्वीकृत' : '✓ Donor Accepted'
-                : isHi ? 'प्रतिक्रिया की प्रतीक्षा' : 'Awaiting Responses'}
-            </span>
-          </div>
-        </div>
-
-        {/* Visual Status Progress Flow */}
-        <div className="mt-6 pt-6 border-t border-white/20">
-          <div className="grid grid-cols-3 gap-2 text-center">
-            {/* Step 1: Donors Notified */}
-            <div className="flex flex-col items-center space-y-1">
-              <div className="w-8 h-8 rounded-full bg-white text-emerald-700 flex items-center justify-center font-bold text-sm shadow-xs">
-                <Check className="h-4 w-4 stroke-[3]" />
-              </div>
-              <span className="text-[11px] font-bold">
-                {isHi ? 'दाता सूचित' : 'Donors Notified'}
-              </span>
-              <span className="text-[10px] text-red-100 opacity-80">
-                {sentCount} {isHi ? 'संदेश भेजे' : 'Sent'}
-              </span>
+          ) : isFulfilled ? (
+            <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-white p-3 text-sm text-emerald-900">
+              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
+              <p>{isHi ? 'एक या अधिक रक्तदाताओं ने अनुरोध स्वीकार किया है। नीचे उनके संपर्क विवरण उपलब्ध हैं।' : 'One or more registered donors accepted this request. Their contact details are shown below.'}</p>
             </div>
-
-            {/* Step 2: Awaiting Acceptance */}
-            <div className="flex flex-col items-center space-y-1">
-              <div
-                className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shadow-xs ${
-                  isFulfilled
-                    ? 'bg-white text-emerald-700'
-                    : 'bg-white/30 text-white animate-pulse'
-                }`}
-              >
-                {isFulfilled ? <Check className="h-4 w-4 stroke-[3]" /> : '2'}
-              </div>
-              <span className="text-[11px] font-bold">
-                {isHi ? 'प्रतीक्षा जारी' : 'Awaiting Acceptance'}
-              </span>
-              <span className="text-[10px] text-red-100 opacity-80">
-                {deliveredCount} {isHi ? 'पहुंचे' : 'Delivered'}
-              </span>
+          ) : isClosed ? (
+            <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-700">
+              <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
+              <p>{isHi ? 'यह खोज बंद कर दी गई है। अब इस अनुरोध के लिए नए अलर्ट नहीं भेजे जाएंगे।' : 'This search is closed. No further alerts will be sent for this request.'}</p>
             </div>
-
-            {/* Step 3: Donor Accepted */}
-            <div className="flex flex-col items-center space-y-1">
-              <div
-                className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shadow-xs ${
-                  isFulfilled
-                    ? 'bg-amber-300 text-slate-900 ring-4 ring-emerald-300/40'
-                    : 'bg-white/20 text-white/60'
-                }`}
-              >
-                {isFulfilled ? <Sparkles className="h-4 w-4 fill-current" /> : '3'}
-              </div>
-              <span className="text-[11px] font-bold">
-                {isHi ? 'रक्तदाता स्वीकृत!' : 'Donor Accepted!'}
-              </span>
-              <span className="text-[10px] text-red-100 opacity-80">
-                {acceptedCount} {isHi ? 'स्वीकृत' : 'Accepted'}
-              </span>
+          ) : pushSent ? (
+            <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+              <Clock className="mt-0.5 h-5 w-5 shrink-0" />
+              <p>{isHi ? 'आपके क्षेत्र के योग्य और सूचना-सक्षम रक्तदाताओं को अलर्ट भेजे गए हैं। हम उनके उत्तर की प्रतीक्षा कर रहे हैं।' : 'Push notifications have been sent to eligible nearby donors who enabled alerts. We are waiting for their responses.'}</p>
             </div>
-          </div>
-        </div>
-      </div>
+          ) : allFailed ? (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+              <p>{isHi ? 'अलर्ट डिलीवर नहीं हो सके। कृपया बाद में पुनः प्रयास करें या अस्पताल से संपर्क करें।' : 'The push alerts could not be delivered. Please try again later or contact the blood bank directly.'}</p>
+            </div>
+          ) : (
+            <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+              <Clock className="mt-0.5 h-5 w-5 shrink-0" />
+              <p>{isHi ? 'इस क्षेत्र में सक्रिय सूचना-सदस्यता वाले संगत रक्तदाता नहीं मिले।' : 'No compatible nearby donors with an active push subscription were found for this request.'}</p>
+            </div>
+          )}
+          {loadError && <p role="alert" className="text-xs text-red-700">{loadError}</p>}
+        </CardContent>
+      </Card>
 
-      {/* Live Notification Counters Banner */}
-      <div className="grid grid-cols-3 gap-3">
-        <Card className="border border-slate-200 text-center p-3 sm:p-4">
-          <p className="text-xs text-slate-500 font-medium">{isHi ? 'व्हाट्सएप भेजे गए' : 'Alerts Sent'}</p>
-          <p className="text-xl sm:text-2xl font-black text-slate-900 mt-1">{sentCount}</p>
-        </Card>
-        <Card className="border border-slate-200 text-center p-3 sm:p-4">
-          <p className="text-xs text-slate-500 font-medium">{isHi ? 'डिलीवर हुए' : 'Delivered'}</p>
-          <p className="text-xl sm:text-2xl font-black text-blue-600 mt-1">{deliveredCount}</p>
-        </Card>
-        <Card className="border border-slate-200 text-center p-3 sm:p-4">
-          <p className="text-xs text-slate-500 font-medium">{isHi ? 'स्वीकृतियां' : 'Accepted'}</p>
-          <p className="text-xl sm:text-2xl font-black text-emerald-600 mt-1">{acceptedCount}</p>
-        </Card>
-      </div>
-
-      {/* CRUCIAL FEATURE: UNLOCKED ACCEPTED DONOR CONTACT CARD */}
       {acceptedDonors.length > 0 && (
-        <section className="space-y-4">
-          <div className="p-1 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 shadow-md">
-            <div className="bg-white rounded-xl p-6 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="p-3 rounded-full bg-emerald-100 text-emerald-800">
-                  <HeartHandshake className="h-6 w-6" />
-                </div>
+        <section className="space-y-3">
+          <div className="flex items-center gap-2">
+            <HeartHandshake className="h-5 w-5 text-emerald-700" />
+            <h2 className="text-lg font-bold text-slate-900">{isHi ? 'स्वीकृत रक्तदाता' : 'Donors who accepted'}</h2>
+          </div>
+          {acceptedDonors.map((donor) => (
+            <Card key={donor.donorId} className="border-emerald-200">
+              <CardContent className="flex flex-col justify-between gap-3 p-4 sm:flex-row sm:items-center">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h2 className="text-lg font-black text-slate-900">
-                      {isHi ? 'रक्तदाता संपर्क विवरण अनलॉक हुआ!' : 'Donor Accepted — Contact Unlocked!'}
-                    </h2>
-                    <Badge variant="success" className="animate-bounce">
-                      {isHi ? 'तैयार' : 'Ready to Donate'}
-                    </Badge>
+                    <p className="font-bold text-slate-900">{donor.name}</p>
+                    <Badge variant="outline">{donor.bloodGroup}</Badge>
                   </div>
-                  <p className="text-xs text-slate-600">
-                    {isHi
-                      ? 'रक्तदाता ने अस्पताल आने की पुष्टि की है। तुरंत कॉल या व्हाट्सएप करें:'
-                      : 'The volunteer has accepted to donate blood. Connect directly below:'}
+                  <p className="mt-1 text-xs text-slate-600">
+                    {donor.distanceKm !== null && donor.distanceKm !== undefined
+                      ? `${donor.distanceKm.toFixed(1)} km away`
+                      : (isHi ? 'दूरी उपलब्ध नहीं' : 'Distance unavailable')}
                   </p>
+                  <p className="mt-1 text-sm font-semibold text-emerald-900">{donor.phone}</p>
                 </div>
-              </div>
-
-              {/* Accepted Donors List */}
-              <div className="space-y-3 pt-2">
-                {acceptedDonors.map((donor, idx) => (
-                  <div
-                    key={idx}
-                    className="p-4 rounded-xl border-2 border-emerald-200 bg-emerald-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-extrabold text-base text-slate-900">{donor.name}</span>
-                        <Badge variant="outline" className="bg-white text-emerald-800 border-emerald-300 font-bold text-xs">
-                          {donor.bloodGroup}
-                        </Badge>
-                        {donor.distanceKm !== undefined && (
-                          <span className="text-xs text-slate-500 font-medium">
-                            ({donor.distanceKm.toFixed(1)} km away)
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-sm font-black text-emerald-900 tracking-wide">
-                        {donor.phone}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2.5 shrink-0">
-                      <a
-                        href={`tel:${donor.phone}`}
-                        className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm active:scale-95 transition-all"
-                      >
-                        <PhoneCall className="h-4 w-4 fill-current" />
-                        <span>{isHi ? 'तुरंत कॉल करें' : 'Call Donor'}</span>
-                      </a>
-
-                      <a
-                        href={
-                          donor.whatsappUrl ||
-                          `https://wa.me/${donor.phone.replace('+', '')}?text=${encodeURIComponent(
-                            `Namaste ${donor.name}, thank you for accepting our blood request for ${request?.patientName} at ${request?.hospitalName}.`
-                          )}`
-                        }
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs shadow-sm active:scale-95 transition-all"
-                      >
-                        <MessageSquare className="h-4 w-4" />
-                        <span>{isHi ? 'व्हाट्सएप चैट' : 'WhatsApp'}</span>
-                      </a>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+                <a
+                  href={`tel:${donor.phone}`}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700"
+                >
+                  <PhoneCall className="h-4 w-4" />
+                  {isHi ? 'रक्तदाता को कॉल करें' : 'Call donor'}
+                </a>
+              </CardContent>
+            </Card>
+          ))}
         </section>
       )}
 
-      {/* Active Notifications (Masked While Pending) */}
-      <Card className="border border-slate-200">
-        <CardHeader className="p-4 sm:p-5 pb-3">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
-              <Users className="h-5 w-5 text-slate-700" />
-              <span>
-                {isHi ? 'अधिसूचित स्वयंसेवी रक्तदाता' : 'Notified Volunteer Donors'}
-              </span>
-            </CardTitle>
-            <span className="text-xs text-slate-500 font-medium">
-              {isHi ? 'गोपनीयता सुरक्षित' : 'Privacy Protected'}
-            </span>
-          </div>
-          <CardDescription className="text-xs text-slate-500">
-            {isHi
-              ? 'गोपनीयता के लिए फोन नंबर छिपाए गए हैं। दाता द्वारा स्वीकार करने पर तुरंत अनलॉक होंगे।'
-              : 'Donor contact numbers remain masked until accepted to prevent spam.'}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-4 sm:p-5 pt-0">
-          {notifications.length === 0 ? (
-            <p className="text-xs text-slate-500 py-3 text-center">
-              {isHi ? 'कोई सूचना प्रेषित नहीं' : 'No notifications sent'}
-            </p>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {notifications.map((n) => {
-                const isAccepted = n.status === 'accepted';
-                return (
-                  <div key={n.id} className="py-3 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${
-                          isAccepted
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : 'bg-slate-100 text-slate-700'
-                        }`}
-                      >
-                        {n.donorBloodGroup || '🩸'}
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-slate-900">
-                          {n.donorName || 'Volunteer Donor'}
-                        </p>
-                        <p className="text-[11px] text-slate-500 font-mono">
-                          {isAccepted ? 'Unlocked above' : n.donorPhoneMasked || '+91 98****3210'}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div>
-                      {isAccepted ? (
-                        <Badge variant="success" className="text-[10px]">
-                          {isHi ? '✓ स्वीकृत' : '✓ Accepted'}
-                        </Badge>
-                      ) : n.status === 'declined' ? (
-                        <Badge variant="outline" className="text-[10px] text-slate-500 border-slate-300">
-                          {isHi ? 'अनुपलब्ध' : 'Declined'}
-                        </Badge>
-                      ) : n.status === 'delivered' ? (
-                        <Badge variant="outline" className="text-[10px] text-blue-700 border-blue-200 bg-blue-50">
-                          {isHi ? 'पहुंचा' : 'Delivered'}
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-[10px] text-slate-600 bg-slate-50">
-                          {isHi ? 'भेजा गया' : 'Sent'}
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Donor Quick Action & Deep Link Share */}
-      <Card className="border border-slate-200 bg-slate-50/50">
-        <CardContent className="p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <p className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-              <ExternalLink className="h-4 w-4 text-slate-600" />
-              <span>{isHi ? 'दाता प्रतिक्रिया डीप-लिंक' : 'Donor Response Action & Deep-Link'}</span>
-            </p>
-            <p className="text-xs text-slate-600">
-              {isHi
-                ? 'यह वही लिंक है जो व्हाट्सएप पर भेजा गया है। इसे स्वयं खोलकर परीक्षण कर सकते हैं:'
-                : 'Direct action page link received by donors on WhatsApp:'}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleCopyLink}
-              className="text-xs border-slate-300 font-semibold"
-            >
-              <Copy className="h-3.5 w-3.5 mr-1" />
-              <span>{copied ? (isHi ? 'कॉपी हुआ!' : 'Copied!') : (isHi ? 'लिंक कॉपी करें' : 'Copy Link')}</span>
-            </Button>
-
-            <Button asChild size="sm" variant="default" className="text-xs bg-red-600 hover:bg-red-700 text-white font-bold">
-              <Link href={`/donor/respond/${requestId}`}>
-                <span>{isHi ? 'दाता प्रतिक्रिया पृष्ठ खोलें' : 'Open Response Page'}</span>
-              </Link>
-            </Button>
-
-            {/* Test simulator button */}
-            {!isFulfilled && (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                loading={simulating}
-                onClick={handleSimulateAccept}
-                className="text-xs border-emerald-400 text-emerald-800 hover:bg-emerald-50 font-bold"
-              >
-                <span>{isHi ? '⚡ स्वीकृति अनुकरण (टेस्ट मोड)' : '⚡ Simulate Accept'}</span>
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+      {!isFulfilled && !hasBankStock && !isClosed && requestCloseToken && (
+        <div className="space-y-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full border-slate-300"
+            disabled={closing}
+            onClick={handleCloseSearch}
+          >
+            {closing ? (isHi ? 'खोज बंद हो रही है…' : 'Closing search…') : (isHi ? 'मुझे रक्तदाता मिल गया — खोज बंद करें' : "I've found help — close search")}
+          </Button>
+          {closeError && <p role="alert" className="text-xs text-red-700">{closeError}</p>}
+        </div>
+      )}
     </div>
   );
 }

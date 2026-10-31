@@ -16,24 +16,24 @@ import {
 } from '@repo/db';
 import { haversineDistance } from '@repo/shared';
 
-export interface OutboundWhatsAppMessage {
+type StoredDonorNotification = DonorNotificationSummary & { requestId: string };
+
+export interface OutboundPushMessage {
   id: string;
-  recipientPhone: string;
-  templateName: string;
-  language: string;
-  parameters: Record<string, string>;
-  interactiveButtons: Array<{ id: string; title: string }>;
+  requestId: string;
+  title: string;
+  body: string;
+  recipientCount: number;
   timestamp: string;
-  requestId?: string;
-  donorId?: string;
 }
 
 export class MockDataStore {
   private bloodBanks: BloodBankCardData[] = [];
   private donors: DonorProfile[] = [];
   private requests: Map<string, BloodRequest> = new Map();
-  private notifications: Map<string, DonorNotificationSummary[]> = new Map();
-  private outboundWhatsApp: OutboundWhatsAppMessage[] = [];
+  private notifications: Map<string, StoredDonorNotification[]> = new Map();
+  private pushSubscriptions = new Map<string, Set<string>>();
+  private outboundPush: OutboundPushMessage[] = [];
 
   constructor() {
     this.reset();
@@ -46,9 +46,11 @@ export class MockDataStore {
     banks?: BloodBankCardData[];
     donors?: DonorProfile[];
   }): void {
+    const useSeedFixtures = process.env.NODE_ENV === 'test';
+
     if (customState?.banks) {
       this.bloodBanks = JSON.parse(JSON.stringify(customState.banks));
-    } else {
+    } else if (useSeedFixtures) {
       this.bloodBanks = SEED_BLOOD_BANKS.map((b) => ({
         id: b.id,
         name: b.name,
@@ -67,11 +69,14 @@ export class MockDataStore {
         source: b.source,
         lastStockUpdate: b.lastStockUpdate,
       }));
+    } else {
+      // Never expose demonstration blood-bank inventory in local or production searches.
+      this.bloodBanks = [];
     }
 
     if (customState?.donors) {
       this.donors = JSON.parse(JSON.stringify(customState.donors));
-    } else {
+    } else if (useSeedFixtures) {
       this.donors = SEED_DONORS.map((d) => ({
         id: d.id,
         userId: d.userId,
@@ -90,15 +95,26 @@ export class MockDataStore {
         lastDonationDate: d.lastDonationDate,
         isAvailable: d.isAvailable,
         searchRadiusKm: d.searchRadiusKm,
-        whatsappConsent: d.whatsappConsent,
         createdAt: d.createdAt,
         updatedAt: d.createdAt,
       }));
+    } else {
+      // Only donors actually registered in this runtime may appear in live searches.
+      this.donors = [];
     }
 
     this.requests.clear();
     this.notifications.clear();
-    this.outboundWhatsApp = [];
+    this.pushSubscriptions.clear();
+    this.outboundPush = [];
+    // Fake subscriptions exist only in automated tests. Real devices must explicitly opt in.
+    if (useSeedFixtures) {
+      for (const donor of this.donors) {
+        if (donor.id !== 'donor-manish-no-push-subscription') {
+          this.addPushSubscription(donor.id, `test-fcm-token-${donor.id}-${'x'.repeat(48)}`);
+        }
+      }
+    }
   }
 
   // Blood Banks
@@ -170,20 +186,26 @@ export class MockDataStore {
   }
 
   // Notifications
-  public addNotification(notif: DonorNotificationSummary & { requestId: string }): void {
+  public addNotification(notif: StoredDonorNotification): void {
     const list = this.notifications.get(notif.requestId) || [];
     list.push(notif);
     this.notifications.set(notif.requestId, list);
   }
 
-  public getNotificationsForRequest(requestId: string): DonorNotificationSummary[] {
+  public getNotificationsForRequest(requestId: string): StoredDonorNotification[] {
     return this.notifications.get(requestId) || [];
+  }
+
+  public getNotificationsForDonor(donorId: string): StoredDonorNotification[] {
+    return Array.from(this.notifications.values())
+      .flat()
+      .filter((notification) => notification.donorId === donorId);
   }
 
   public getNotificationForDonorAndRequest(
     requestId: string,
     donorId: string
-  ): DonorNotificationSummary | undefined {
+  ): StoredDonorNotification | undefined {
     const list = this.notifications.get(requestId);
     return list?.find((n) => n.donorId === donorId);
   }
@@ -206,17 +228,39 @@ export class MockDataStore {
     return true;
   }
 
-  // Outbound WhatsApp Messages
-  public recordOutboundWhatsApp(message: OutboundWhatsAppMessage): void {
-    this.outboundWhatsApp.push(message);
+  // Device-scoped web push subscriptions.
+  public addPushSubscription(donorId: string, token: string): void {
+    const tokens = this.pushSubscriptions.get(donorId) || new Set<string>();
+    tokens.add(token);
+    this.pushSubscriptions.set(donorId, tokens);
   }
-
-  public getOutboundWhatsAppMessages(): OutboundWhatsAppMessage[] {
-    return [...this.outboundWhatsApp];
+  public getPushTokensForDonor(donorId: string): string[] {
+    return [...(this.pushSubscriptions.get(donorId) || new Set<string>())];
   }
-
-  public clearOutboundWhatsAppMessages(): void {
-    this.outboundWhatsApp = [];
+  public hasPushSubscription(donorId: string): boolean {
+    return (this.pushSubscriptions.get(donorId)?.size || 0) > 0;
+  }
+  public removePushSubscription(donorId: string, token: string): void {
+    const tokens = this.pushSubscriptions.get(donorId);
+    if (!tokens) return;
+    tokens.delete(token);
+    if (tokens.size === 0) this.pushSubscriptions.delete(donorId);
+  }
+  public removePushSubscriptionToken(token: string): void {
+    for (const [donorId, tokens] of this.pushSubscriptions) {
+      tokens.delete(token);
+      if (tokens.size === 0) this.pushSubscriptions.delete(donorId);
+    }
+  }
+  public recordOutboundPush(message: OutboundPushMessage): void {
+    this.outboundPush.push(message);
+  }
+  public getOutboundPushMessages(): OutboundPushMessage[] {
+    return [...this.outboundPush];
+  }
+  public setNotificationDelivery(requestId: string, donorId: string, status: NotificationStatus): void {
+    const notification = this.getNotificationForDonorAndRequest(requestId, donorId);
+    if (notification) notification.status = status;
   }
 
   /**

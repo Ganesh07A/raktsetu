@@ -210,7 +210,6 @@ describe('Adversarial Zod Schema Testing', () => {
       longitude: 77.2090,
       state: 'Delhi',
       district: 'New Delhi',
-      whatsappConsent: true,
     };
 
     it('accepts valid minimal donor payload', () => {
@@ -242,15 +241,19 @@ describe('Adversarial Zod Schema Testing', () => {
       expect(resOver.success).toBe(false);
     });
 
-    it('enforces mandatory whatsappConsent === true (rejects false or missing)', () => {
-      const noConsent = { ...validDonorBase, whatsappConsent: false };
-      const resNo = donorRegistrationSchema.safeParse(noConsent);
-      expect(resNo.success).toBe(false);
+    it('allows registration without a notification opt-in; browser push consent is collected separately', () => {
+      const withoutOptIn = donorRegistrationSchema.safeParse(validDonorBase);
+      expect(withoutOptIn.success).toBe(true);
 
-      const missingConsent = { ...validDonorBase };
-      delete (missingConsent as Record<string, unknown>).whatsappConsent;
-      const resMissing = donorRegistrationSchema.safeParse(missingConsent);
-      expect(resMissing.success).toBe(false);
+      // Legacy WhatsApp consent is no longer part of the donor registration contract.
+      const withLegacyFalseConsent = donorRegistrationSchema.safeParse({
+        ...validDonorBase,
+        whatsappConsent: false,
+      });
+      expect(withLegacyFalseConsent.success).toBe(true);
+      if (withLegacyFalseConsent.success) {
+        expect('whatsappConsent' in withLegacyFalseConsent.data).toBe(false);
+      }
     });
 
     it('validates all 8 ABO/Rh blood groups and rejects invalid groups', () => {
@@ -438,12 +441,17 @@ describe('Adversarial Hono API Testing', () => {
       expect(res.headers.get('access-control-allow-origin')).toBe('http://localhost:3000');
     });
 
-    it('returns Access-Control-Allow-Origin for whitelisted origin https://raktkhoj.org', async () => {
-      const res = await app.request('/health', {
-        headers: { Origin: 'https://raktkhoj.org' },
-      });
-      expect(res.status).toBe(200);
-      expect(res.headers.get('access-control-allow-origin')).toBe('https://raktkhoj.org');
+    it('returns Access-Control-Allow-Origin for every configured origin', async () => {
+      const configuredOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000,https://raktkhoj.org')
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter(Boolean);
+
+      for (const origin of configuredOrigins) {
+        const res = await app.request('/health', { headers: { Origin: origin } });
+        expect(res.status).toBe(200);
+        expect(res.headers.get('access-control-allow-origin')).toBe(origin);
+      }
     });
 
     it('does NOT reflect unwhitelisted or adversarial origins in Access-Control-Allow-Origin', async () => {
@@ -543,8 +551,8 @@ describe('Adversarial Hono API Testing', () => {
       ];
       for (const query of injectionQueries) {
         const res = await app.request(query);
-        // The server must not crash (returns 200 or 403 or 400)
-        expect([200, 400, 403]).toContain(res.status);
+        // The retired WhatsApp route now correctly returns 404; malformed search input returns 400.
+        expect([200, 400, 401, 403, 404]).toContain(res.status);
       }
     });
   });

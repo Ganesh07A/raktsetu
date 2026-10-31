@@ -3,7 +3,6 @@ import {
   BLOOD_GROUPS,
   haversineDistance,
   type BloodGroup,
-  type BloodBankCardData,
 } from '@repo/shared';
 import { eraktkoshProxy } from '../services/eraktkosh-proxy';
 import { mockStore } from '../services/mock-store';
@@ -101,8 +100,8 @@ bloodBankRoutes.get('/search', async (c) => {
 
   let matchedBanks = proxyResult.banks;
 
-  // Fallback to in-memory store if needed
-  if (!matchedBanks || matchedBanks.length === 0) {
+  // Seed/in-memory fixtures are test-only. Live users must never receive demo hospitals.
+  if (process.env.NODE_ENV === 'test' && (!matchedBanks || matchedBanks.length === 0)) {
     const allBanks = mockStore.getBloodBanks();
     matchedBanks = [];
 
@@ -124,7 +123,9 @@ bloodBankRoutes.get('/search', async (c) => {
         let matchingStock = bank.stock;
         if (bloodGroup) {
           matchingStock = bank.stock.filter(
-            (s) => s.bloodGroup === bloodGroup && s.unitsAvailable > 0
+            (s) => s.bloodGroup === bloodGroup &&
+              s.componentType === componentType &&
+              s.unitsAvailable > 0
           );
         }
 
@@ -136,8 +137,17 @@ bloodBankRoutes.get('/search', async (c) => {
       }
     }
 
-    matchedBanks.sort((a, b) => a.distanceKm - b.distanceKm);
   }
+
+  matchedBanks = [...(matchedBanks || [])].sort((a, b) => {
+    const aHasStock = a.stock.some((item) => item.unitsAvailable > 0);
+    const bHasStock = b.stock.some((item) => item.unitsAvailable > 0);
+    if (aHasStock !== bHasStock) return aHasStock ? -1 : 1;
+    if (a.distanceKm === null && b.distanceKm !== null) return 1;
+    if (a.distanceKm !== null && b.distanceKm === null) return -1;
+    if (a.distanceKm === null || b.distanceKm === null) return 0;
+    return a.distanceKm - b.distanceKm;
+  });
 
   return c.json({
     banks: matchedBanks,

@@ -2,12 +2,12 @@ import {
   db,
   bloodRequests,
   donorNotifications,
+  donorPushSubscriptions,
   donorProfiles,
   users,
   eq,
   ne,
   and,
-  or,
 } from '@repo/db';
 import {
   type BloodRequest,
@@ -81,7 +81,7 @@ export class RequestService {
     id: string;
     requestId: string;
     donorId: string;
-    whatsappMessageId?: string | null;
+    pushMessageId?: string | null;
     status: NotificationStatus;
     donorName?: string;
     donorBloodGroup?: BloodGroup;
@@ -109,7 +109,7 @@ export class RequestService {
             id: notif.id,
             requestId: notif.requestId,
             donorId: notif.donorId,
-            whatsappMessageId: notif.whatsappMessageId ?? null,
+            pushMessageId: notif.pushMessageId ?? null,
             status: notif.status,
             sentAt: notif.sentAt ? new Date(notif.sentAt) : new Date(),
           })
@@ -120,223 +120,56 @@ export class RequestService {
     }
   }
 
-  /**
-   * Resolve donor identity using phone number (from msg.from or registration)
-   */
-  public async findDonorByPhone(
-    phone: string
-  ): Promise<{ donorId: string; name: string; phone: string; bloodGroup: string } | null> {
-    const rawDigits = phone.replace(/\D/g, '');
-    const tenDigits = rawDigits.slice(-10);
-    const plus91 = `+91${tenDigits}`;
+  /** List active web-push tokens registered by a donor. */
+  public async getPushTokensForDonor(donorId: string): Promise<string[]> {
+    if (!this.isLiveDb()) return mockStore.getPushTokensForDonor(donorId);
+    const rows = await db.select({ token: donorPushSubscriptions.fcmToken })
+      .from(donorPushSubscriptions)
+      .where(eq(donorPushSubscriptions.donorId, donorId));
+    return rows.map((row) => row.token);
+  }
 
-    // 1. Live DB mode: query PostgreSQL exclusively (never fall back to mock data)
-    if (this.isLiveDb()) {
-      try {
-        const rows = await db
-          .select({
-            donorId: donorProfiles.id,
-            name: users.name,
-            phone: users.phone,
-            bloodGroup: donorProfiles.bloodGroup,
-          })
-          .from(donorProfiles)
-          .innerJoin(users, eq(donorProfiles.userId, users.id))
-          .where(
-            or(
-              eq(users.phone, phone),
-              eq(users.phone, plus91),
-              eq(users.phone, rawDigits),
-              eq(users.phone, tenDigits)
-            )
-          )
-          .limit(1);
-
-        if (rows[0]) {
-          return {
-            donorId: rows[0].donorId,
-            name: rows[0].name || 'Volunteer Donor',
-            phone: rows[0].phone,
-            bloodGroup: rows[0].bloodGroup,
-          };
-        }
-      } catch (err) {
-        console.warn('[@repo/api] Error looking up donor by phone in DB:', err);
-      }
-      return null;
+  public async updateNotificationDelivery(params: {
+    requestId: string; donorId: string; status: NotificationStatus; pushMessageId?: string | null;
+  }): Promise<void> {
+    if (!this.isLiveDb()) {
+      mockStore.setNotificationDelivery(params.requestId, params.donorId, params.status);
+      return;
     }
+    await db.update(donorNotifications)
+      .set({ status: params.status, pushMessageId: params.pushMessageId ?? null })
+      .where(and(
+        eq(donorNotifications.requestId, params.requestId),
+        eq(donorNotifications.donorId, params.donorId)
+      ));
+  }
 
-    // 2. Mock / Test mode: query mock store
-    const mockDonor =
-      mockStore.getDonorByPhone(phone) ||
-      mockStore.getDonorByPhone(plus91) ||
-      mockStore.getDonorByPhone(rawDigits) ||
-      mockStore.getDonorByPhone(tenDigits) ||
-      mockStore.getAllDonors().find((d) => {
-        const dDigits = ((d as any).phone || '').replace(/\D/g, '');
-        return dDigits.endsWith(tenDigits) || dDigits === rawDigits;
-      });
-
-    if (mockDonor) {
-      return {
-        donorId: mockDonor.id,
-        name: (mockDonor as any).name || 'Volunteer Donor',
-        phone: (mockDonor as any).phone || phone,
-        bloodGroup: mockDonor.bloodGroup,
-      };
+  public async removePushSubscriptionToken(donorId: string, token: string): Promise<void> {
+    if (!this.isLiveDb()) {
+      mockStore.removePushSubscription(donorId, token);
+      return;
     }
-
-    return null;
+    await db.delete(donorPushSubscriptions).where(and(
+      eq(donorPushSubscriptions.donorId, donorId),
+      eq(donorPushSubscriptions.fcmToken, token)
+    ));
   }
 
   /**
-   * Fetch all active pending notifications for a donor (to safely handle free-text responses)
-   */
-  public async getPendingNotificationsForDonor(
-    donorId: string
-  ): Promise<Array<{ requestId: string; notificationId: string; patientName?: string; createdAt?: string }>> {
-    const results: Array<{ requestId: string; notificationId: string; patientName?: string; createdAt?: string }> = [];
-
-    // 1. Query live PostgreSQL if active (never fall back to mock data)
-    if (this.isLiveDb()) {
-      try {
-        const rows = await db
-          .select({
-            requestId: donorNotifications.requestId,
-            notificationId: donorNotifications.id,
-            status: donorNotifications.status,
-            patientName: bloodRequests.patientName,
-            requestStatus: bloodRequests.status,
-            createdAt: donorNotifications.sentAt,
-          })
-          .from(donorNotifications)
-          .innerJoin(bloodRequests, eq(donorNotifications.requestId, bloodRequests.id))
-          .where(
-            and(
-              eq(donorNotifications.donorId, donorId),
-              or(
-                eq(donorNotifications.status, 'pending'),
-                eq(donorNotifications.status, 'sent'),
-                eq(donorNotifications.status, 'delivered'),
-                eq(donorNotifications.status, 'read')
-              ),
-              or(
-                eq(bloodRequests.status, 'donors_notified'),
-                eq(bloodRequests.status, 'searching')
-              )
-            )
-          );
-
-        for (const r of rows) {
-          results.push({
-            requestId: r.requestId,
-            notificationId: r.notificationId,
-            patientName: r.patientName,
-            createdAt: r.createdAt ? r.createdAt.toISOString() : undefined,
-          });
-        }
-        return results;
-      } catch (err) {
-        console.warn('[@repo/api] Error querying pending notifications in DB:', err);
-        return [];
-      }
-    }
-
-    // 2. Mock / Test mode: query mock store
-    const allRequests = mockStore.getAllRequests();
-    for (const req of allRequests) {
-      if (req.status !== 'donors_notified' && req.status !== 'searching') continue;
-      const notifs = mockStore.getNotificationsForRequest(req.id);
-      for (const n of notifs) {
-        if (
-          n.donorId === donorId &&
-          n.status !== 'accepted' &&
-          n.status !== 'declined' &&
-          n.status !== 'failed' &&
-          n.status !== 'expired'
-        ) {
-          results.push({
-            requestId: req.id,
-            notificationId: n.id,
-            patientName: req.patientName,
-            createdAt: n.sentAt || undefined,
-          });
-        }
-      }
-    }
-
-    return results;
-  }
-
-  /**
-   * Verify whether a donor has a notification for a specific request
-   */
-  public async getNotificationForDonorAndRequest(
-    requestId: string,
-    donorId: string
-  ): Promise<{ id: string; requestId: string; donorId: string; status: string } | null> {
-    if (this.isLiveDb()) {
-      try {
-        const rows = await db
-          .select({
-            id: donorNotifications.id,
-            requestId: donorNotifications.requestId,
-            donorId: donorNotifications.donorId,
-            status: donorNotifications.status,
-          })
-          .from(donorNotifications)
-          .where(
-            and(
-              eq(donorNotifications.requestId, requestId),
-              eq(donorNotifications.donorId, donorId)
-            )
-          )
-          .limit(1);
-
-        return rows[0] || null;
-      } catch (err) {
-        console.warn('[@repo/api] Error fetching notification in DB:', err);
-        return null;
-      }
-    }
-
-    const mockNotif = mockStore.getNotificationForDonorAndRequest(requestId, donorId);
-    if (mockNotif) {
-      return {
-        id: mockNotif.id,
-        requestId,
-        donorId: mockNotif.donorId,
-        status: mockNotif.status,
-      };
-    }
-
-    return null;
-  }
-
-  /**
-   * Handle donor reply (accept or decline) from WhatsApp webhook or direct deep-link
+   * Handle donor reply (accept or decline) from a signed push action or authenticated donor session
    */
   public async handleDonorReply(
     requestId: string,
-    donorIdentifier: string,
+    donorId: string,
     action: 'accepted' | 'declined',
     note?: string
   ): Promise<{ success: boolean; duplicate?: boolean; requestStatus: RequestStatus }> {
     if (!this.isLiveDb()) {
-      return mockStore.simulateDonorReply(requestId, donorIdentifier, action, note);
+      return mockStore.simulateDonorReply(requestId, donorId, action, note);
     }
 
     // Live DB Mode
     const respondedAt = new Date();
-
-    // Resolve donorId if donorIdentifier is a phone number
-    let resolvedDonorId = donorIdentifier;
-    if (donorIdentifier.startsWith('+') || /^\d{10,13}$/.test(donorIdentifier)) {
-      const donor = await this.findDonorByPhone(donorIdentifier);
-      if (donor) {
-        resolvedDonorId = donor.donorId;
-      }
-    }
 
     return await db.transaction(async (tx) => {
       // 1. Fetch request with row-level lock (FOR UPDATE)
@@ -365,14 +198,14 @@ export class RequestService {
         .where(
           and(
             eq(donorNotifications.requestId, requestId),
-            eq(donorNotifications.donorId, resolvedDonorId)
+            eq(donorNotifications.donorId, donorId)
           )
         )
         .for('update')
         .limit(1);
 
       if (!existingNotif[0]) {
-        throw new Error(`Donor notification not found for request ${requestId} and donor ${resolvedDonorId}`);
+        throw new Error(`Donor notification not found for request ${requestId} and donor ${donorId}`);
       }
 
       const notif = existingNotif[0];
@@ -404,7 +237,7 @@ export class RequestService {
         .where(
           and(
             eq(donorNotifications.requestId, requestId),
-            eq(donorNotifications.donorId, resolvedDonorId)
+            eq(donorNotifications.donorId, donorId)
           )
         )
         .returning();
@@ -446,7 +279,7 @@ export class RequestService {
               and(
                 eq(donorNotifications.requestId, requestId),
                 eq(donorNotifications.status, 'accepted'),
-                ne(donorNotifications.donorId, resolvedDonorId)
+                ne(donorNotifications.donorId, donorId)
               )
             );
 
@@ -474,7 +307,7 @@ export class RequestService {
 
       // Keep mockStore in sync for fallback
       try {
-        mockStore.simulateDonorReply(requestId, resolvedDonorId, action, note);
+        mockStore.simulateDonorReply(requestId, donorId, action, note);
       } catch {
         // Ignore mock store sync failure
       }
@@ -486,20 +319,35 @@ export class RequestService {
     });
   }
 
-  /**
-   * Update message status from WhatsApp status receipts (delivered, read, failed)
-   */
-  public async handleDeliveryReceipt(wamid: string, status: 'delivered' | 'read' | 'failed'): Promise<void> {
-    if (this.isLiveDb()) {
-      try {
-        await db
-          .update(donorNotifications)
-          .set({ status })
-          .where(eq(donorNotifications.whatsappMessageId, wamid));
-      } catch (err) {
-        console.warn('[@repo/api] Warning: Failed to update delivery receipt in DB:', err);
-      }
+  /** Close a seeker-owned search without overriding an already fulfilled request. */
+  public async closeRequest(requestId: string): Promise<boolean> {
+    if (!this.isLiveDb()) {
+      const existing = mockStore.getRequest(requestId);
+      if (!existing || ['fulfilled', 'cancelled', 'expired'].includes(existing.status)) return false;
+      return mockStore.updateRequest(requestId, {
+        status: 'cancelled',
+        fulfillmentSource: null,
+      });
     }
+
+    const updated = await db.update(bloodRequests)
+      .set({ status: 'cancelled', fulfillmentSource: null })
+      .where(and(
+        eq(bloodRequests.id, requestId),
+        ne(bloodRequests.status, 'fulfilled'),
+        ne(bloodRequests.status, 'cancelled'),
+        ne(bloodRequests.status, 'expired')
+      ))
+      .returning({ id: bloodRequests.id });
+
+    if (updated.length > 0) {
+      mockStore.updateRequest(requestId, {
+        status: 'cancelled',
+        fulfillmentSource: null,
+      });
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -600,9 +448,6 @@ export class RequestService {
                 distanceKm: dist,
                 respondedAt: n.respondedAt ? n.respondedAt.toISOString() : new Date().toISOString(),
                 directCallUrl: `tel:${donorPhone}`,
-                whatsappUrl: `https://wa.me/${donorPhone.replace('+', '')}?text=${encodeURIComponent(
-                  `Namaste ${donorName}, thank you for accepting blood request for ${request.patientName} at ${request.hospitalName}.`
-                )}`,
               });
             }
           }
@@ -639,9 +484,6 @@ export class RequestService {
               distanceKm: dist,
               respondedAt: n.respondedAt || new Date().toISOString(),
               directCallUrl: `tel:${donorPhone}`,
-              whatsappUrl: `https://wa.me/${donorPhone.replace('+', '')}?text=${encodeURIComponent(
-                `Namaste ${donorName}, thank you for accepting blood request for ${request.patientName} at ${request.hospitalName}.`
-              )}`,
             });
           }
         }

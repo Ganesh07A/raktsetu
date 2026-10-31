@@ -1,18 +1,17 @@
 import { Hono } from 'hono';
 import {
   BLOOD_GROUPS,
-  haversineDistance,
   type BloodGroup,
   type ComponentType,
   type EmergencyType,
   type RadiusPreset,
   type BloodRequest,
-  type DonorNotificationSummary,
-  type AcceptedDonorContact,
 } from '@repo/shared';
 import { mockStore } from '../services/mock-store';
 import { donorMatcher } from '../services/donor-matcher';
-import { whatsappService } from '../services/whatsapp';
+import { pushNotificationService } from '../services/push-notifications';
+import { createDonorResponseToken, createRequestCloseToken, verifyRequestCloseToken } from '../services/donor-session';
+import { eraktkoshProxy } from '../services/eraktkosh-proxy';
 import { requestService } from '../services/request-service';
 
 export const requestRoutes = new Hono();
@@ -80,25 +79,28 @@ requestRoutes.post('/', async (c) => {
   const radiusKm = Number(searchRadiusKm) as RadiusPreset;
   const requestId = `req-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-  // Stage 1: Check nearby blood banks within radius for stock
-  let bankFound = false;
-  const allBanks = mockStore.getBloodBanks();
+  // Stage 1: Use the same radius-aware stock search in tests and production.
+  // The proxy supplies seeded fixtures only in test mode and live results otherwise.
+  const bankSearch = await eraktkoshProxy.searchStock({
+    lat: latitude,
+    lng: longitude,
+    radiusKm,
+    bloodGroup: bloodGroupNeeded as BloodGroup,
+    componentType: componentType as ComponentType,
+    stateCode: state,
+    districtCode: district,
+  });
 
-  for (const bank of allBanks) {
-    if (bank.latitude === null || bank.longitude === null) continue;
-    const dist = haversineDistance(latitude, longitude, bank.latitude, bank.longitude);
-    if (dist <= radiusKm) {
-      const hasStock = bank.stock.some(
-        (s) =>
-          s.bloodGroup === bloodGroupNeeded &&
-          s.unitsAvailable >= unitsNeeded
-      );
-      if (hasStock) {
-        bankFound = true;
-        break;
-      }
-    }
-  }
+  const bankFound = bankSearch.banks.some((bank) => {
+    const measuredNearby = bank.distanceKm !== null && bank.distanceKm <= radiusKm;
+    const hasRequiredStock = bank.stock.some((stock) =>
+      stock.bloodGroup === bloodGroupNeeded &&
+      stock.componentType === componentType &&
+      stock.unitsAvailable >= unitsNeeded
+    );
+    // A bank whose distance is unknown is not treated as radius-confirmed stock.
+    return measuredNearby && hasRequiredStock;
+  });
 
   const newRequest: BloodRequest = {
     id: requestId,
@@ -146,33 +148,39 @@ requestRoutes.post('/', async (c) => {
         '$1 $2****$3'
       );
 
-      // Dispatch WhatsApp Business notification
-      const sendResult = await whatsappService.sendDonationRequest({
-        recipientPhone: donor.phone,
-        donorId: donor.id,
-        donorName: donor.name,
-        requestId,
-        patientName: newRequest.patientName,
-        hospitalName: newRequest.hospitalName,
-        bloodGroup: newRequest.bloodGroupNeeded,
-        unitsNeeded: newRequest.unitsNeeded,
-        distanceKm: donor.distanceKm,
-        language: donor.preferredLanguage || 'en',
-      });
-
+      const responseToken = createDonorResponseToken(requestId, donor.id);
       await requestService.recordNotification({
         id: notifId,
         requestId,
         donorId: donor.id,
-        whatsappMessageId: sendResult.messageId,
-        status: 'sent',
+        status: 'pending',
         donorName: donor.name,
         donorBloodGroup: donor.bloodGroup,
         donorPhoneMasked: maskedPhone,
         sentAt: new Date().toISOString(),
       });
 
-      notificationsSent++;
+      const deviceTokens = await requestService.getPushTokensForDonor(donor.id);
+      const sendResult = await pushNotificationService.sendDonationRequest({
+        tokens: deviceTokens,
+        requestId,
+        responseToken,
+        bloodGroup: newRequest.bloodGroupNeeded,
+        distanceKm: donor.distanceKm,
+        language: donor.preferredLanguage || 'en',
+      });
+
+      await requestService.updateNotificationDelivery({
+        requestId,
+        donorId: donor.id,
+        status: sendResult.success ? 'sent' : 'failed',
+        pushMessageId: sendResult.messageId,
+      });
+
+      for (const invalidToken of sendResult.invalidTokens) {
+        await requestService.removePushSubscriptionToken(donor.id, invalidToken);
+      }
+      if (sendResult.success) notificationsSent++;
     }
   }
 
@@ -181,6 +189,7 @@ requestRoutes.post('/', async (c) => {
       request: newRequest,
       compatibleDonorsCount,
       notificationsSent,
+      requestCloseToken: createRequestCloseToken(requestId),
     },
     201
   );
@@ -200,50 +209,36 @@ requestRoutes.get('/:id', async (c) => {
 
   return c.json({
     request: details.request,
-    notifications: details.notifications,
+    // Do not disclose identities of donors who have not accepted the request.
+    notifications: details.notifications.map((notification) => ({
+      id: notification.id,
+      status: notification.status,
+      sentAt: notification.sentAt,
+      respondedAt: notification.respondedAt,
+    })),
     acceptedDonors: details.acceptedDonors,
   });
 });
 
-// POST /api/v1/requests/:id/respond - Direct response endpoint from deep link
-requestRoutes.post('/:id/respond', async (c) => {
+// POST /api/v1/requests/:id/close - Stop an active search at the seeker's request.
+requestRoutes.post('/:id/close', async (c) => {
   const { id } = c.req.param();
   let body: any;
-  try {
-    body = await c.req.json();
-  } catch {
+  try { body = await c.req.json(); } catch {
     return c.json({ error: 'Invalid JSON body' }, 400);
   }
 
-  const details = await requestService.getRequestWithDetails(id);
-  if (!details || !details.request) {
-    return c.json({ error: `Request ${id} not found` }, 404);
+  const signed = verifyRequestCloseToken(String(body?.requestCloseToken || ''));
+  if (!signed || signed.requestId !== id) {
+    return c.json({ error: 'Request close link is invalid or expired' }, 401);
   }
 
-  const action = body.status || body.action;
-  if (!action || !['accepted', 'declined', 'accept', 'decline'].includes(action)) {
-    return c.json(
-      { error: "Valid status ('accepted' or 'declined') is required" },
-      400
-    );
+  const closed = await requestService.closeRequest(id);
+  if (!closed) {
+    return c.json({ error: 'This request is already fulfilled, closed, expired, or does not exist' }, 409);
   }
-
-  const normalizedAction =
-    action === 'accepted' || action === 'accept' ? 'accepted' : 'declined';
-  const donorId = body.donorId || body.donorPhone;
-
-  if (donorId) {
-    await requestService.handleDonorReply(
-      id,
-      donorId,
-      normalizedAction,
-      body.responseNote
-    );
-  }
-
-  return c.json({ success: true, status: normalizedAction });
+  return c.json({ success: true, status: 'cancelled' });
 });
-
 // PATCH /api/v1/requests/:id/status - Update status manually
 requestRoutes.patch('/:id/status', async (c) => {
   const { id } = c.req.param();

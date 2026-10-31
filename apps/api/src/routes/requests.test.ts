@@ -1,10 +1,14 @@
 import { describe, expect, it, beforeEach } from 'bun:test';
 import { app } from '../index';
 import { mockStore } from '../services/mock-store';
+import { createDonorResponseToken } from '../services/donor-session';
+import { eraktkoshProxy } from '../services/eraktkosh-proxy';
 
 describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
   beforeEach(() => {
+    process.env.NODE_ENV = 'test';
     mockStore.reset();
+    eraktkoshProxy.clearCache();
   });
 
   describe('POST / (Create Blood Request)', () => {
@@ -125,8 +129,8 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
         expect((n as any).donorPhoneMasked).toContain('****');
       }
 
-      // Verify WhatsApp messages were queued
-      const msgs = mockStore.getOutboundWhatsAppMessages();
+      // Verify push messages were queued
+      const msgs = mockStore.getOutboundPushMessages();
       expect(msgs.some((m) => m.requestId === json.request.id)).toBe(true);
     });
   });
@@ -137,7 +141,7 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
       expect(res.status).toBe(404);
     });
 
-    it('returns waiting room details with masked contacts when pending and unmasked when accepted', async () => {
+    it('keeps pending donor details private and unlocks contacts only after acceptance', async () => {
       // 1. Create cascading request
       const createRes = await app.request('/api/v1/requests', {
         method: 'POST',
@@ -161,25 +165,30 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
       const initJson = (await initRes.json()) as {
         request: { status: string };
         acceptedDonors: unknown[];
-        notifications: Array<{ donorPhoneMasked?: string }>;
+        notifications: Array<{ id: string; status: string; donorId?: string; donorPhoneMasked?: string; donorName?: string }>;
       };
       expect(initJson.request.status).toBe('donors_notified');
       expect(initJson.acceptedDonors.length).toBe(0);
-      expect(initJson.notifications[0]!.donorPhoneMasked).toContain('****');
+      expect(initJson.notifications.length).toBeGreaterThan(0);
+      expect(initJson.notifications[0]!.status).toBe('sent');
+      // Pending donor identity and contact details must remain private.
+      expect(initJson.notifications[0]!.donorId).toBeUndefined();
+      expect(initJson.notifications[0]!.donorPhoneMasked).toBeUndefined();
+      expect(initJson.notifications[0]!.donorName).toBeUndefined();
 
       // 3. Donor accepts via deep link respond endpoint
-      const respondRes = await app.request(`/api/v1/requests/${reqId}/respond`, {
+      const respondRes = await app.request('/api/v1/push/respond', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          donorId: 'donor-amit-ab-neg',
+          responseToken: createDonorResponseToken(reqId, 'donor-amit-ab-neg'),
           action: 'accepted',
           responseNote: 'On my way to AIIMS, will arrive in 20 minutes',
         }),
       });
       expect(respondRes.status).toBe(200);
 
-      // 4. Waiting room unlocks unmasked contact details and tel/wa links
+      // 4. Waiting room unlocks unmasked contact details after acceptance
       const acceptedRes = await app.request(`/api/v1/requests/${reqId}`);
       expect(acceptedRes.status).toBe(200);
 
@@ -190,7 +199,6 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
           name: string;
           phone: string;
           directCallUrl: string;
-          whatsappUrl: string;
         }>;
       };
 
@@ -202,7 +210,6 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
       expect(donor.donorId).toBe('donor-amit-ab-neg');
       expect(donor.phone).toBe('+919822233344');
       expect(donor.directCallUrl).toBe('tel:+919822233344');
-      expect(donor.whatsappUrl).toContain('https://wa.me/919822233344');
     });
 
     it('donor decline marks notification declined without fulfilling request', async () => {
@@ -224,11 +231,11 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
       const reqId = created.request.id;
 
       // 2. Donor declines
-      const respondRes = await app.request(`/api/v1/requests/${reqId}/respond`, {
+      const respondRes = await app.request('/api/v1/push/respond', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          donorId: 'donor-amit-ab-neg',
+          responseToken: createDonorResponseToken(reqId, 'donor-amit-ab-neg'),
           action: 'declined',
           responseNote: 'Out of town',
         }),
@@ -239,12 +246,14 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
       const getRes = await app.request(`/api/v1/requests/${reqId}`);
       const getJson = (await getRes.json()) as {
         request: { status: string };
-        notifications: Array<{ donorId: string; status: string }>;
+        notifications: Array<{ id: string; status: string }>;
       };
 
       expect(getJson.request.status).toBe('donors_notified');
-      const declinedNotif = getJson.notifications.find((n) => n.donorId === 'donor-amit-ab-neg');
-      expect(declinedNotif?.status).toBe('declined');
+      // More than one compatible donor can be notified (AB-, A-, B-, and O-).
+      // The waiting-room API intentionally hides donor identity until acceptance.
+      expect(getJson.notifications.some((notification) => notification.status === 'declined')).toBe(true);
+      expect(getJson.notifications.every((notification) => !('donorId' in notification))).toBe(true);
     });
   });
 });

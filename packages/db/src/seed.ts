@@ -40,6 +40,7 @@ export async function seedDatabase() {
       await db
         .insert(donorProfiles)
         .values({
+          // Keep deterministic IDs so seeded records retain stable references.
           id: d.id,
           userId: d.userId,
           bloodGroup: d.bloodGroup,
@@ -54,7 +55,6 @@ export async function seedDatabase() {
           lastDonationDate: d.lastDonationDate,
           isAvailable: d.isAvailable,
           searchRadiusKm: d.searchRadiusKm,
-          whatsappConsent: d.whatsappConsent,
         })
         .onConflictDoNothing();
     }

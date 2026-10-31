@@ -33,7 +33,6 @@ export interface SeedDonor {
   lastDonationDate: string | null;
   isAvailable: boolean;
   searchRadiusKm: number;
-  whatsappConsent: boolean;
   preferredLanguage: 'en' | 'hi';
   createdAt: string;
 }
@@ -385,7 +384,6 @@ export const SEED_DONORS: SeedDonor[] = [
     lastDonationDate: '2026-05-01', // ~180 days ago (eligible)
     isAvailable: true,
     searchRadiusKm: 10,
-    whatsappConsent: true,
     preferredLanguage: 'en',
     createdAt: '2026-01-10T00:00:00Z',
   },
@@ -406,7 +404,6 @@ export const SEED_DONORS: SeedDonor[] = [
     lastDonationDate: '2026-06-15', // ~137 days ago (>120 days female, eligible)
     isAvailable: true,
     searchRadiusKm: 10,
-    whatsappConsent: true,
     preferredLanguage: 'hi',
     createdAt: '2026-02-15T00:00:00Z',
   },
@@ -427,7 +424,6 @@ export const SEED_DONORS: SeedDonor[] = [
     lastDonationDate: '2026-04-10', // ~203 days ago (eligible)
     isAvailable: true,
     searchRadiusKm: 10,
-    whatsappConsent: true,
     preferredLanguage: 'en',
     createdAt: '2026-03-01T00:00:00Z',
   },
@@ -448,7 +444,6 @@ export const SEED_DONORS: SeedDonor[] = [
     lastDonationDate: '2026-07-01', // ~121 days ago (eligible)
     isAvailable: true,
     searchRadiusKm: 10,
-    whatsappConsent: true,
     preferredLanguage: 'hi',
     createdAt: '2026-03-15T00:00:00Z',
   },
@@ -469,7 +464,6 @@ export const SEED_DONORS: SeedDonor[] = [
     lastDonationDate: '2026-05-20', // ~163 days ago (eligible)
     isAvailable: true,
     searchRadiusKm: 50,
-    whatsappConsent: true,
     preferredLanguage: 'en',
     createdAt: '2026-04-01T00:00:00Z',
   },
@@ -490,7 +484,6 @@ export const SEED_DONORS: SeedDonor[] = [
     lastDonationDate: '2026-09-25', // 35 days ago (< 120 days female, soft warning)
     isAvailable: true,
     searchRadiusKm: 10,
-    whatsappConsent: true,
     preferredLanguage: 'en',
     createdAt: '2026-04-10T00:00:00Z',
   },
@@ -511,12 +504,11 @@ export const SEED_DONORS: SeedDonor[] = [
     lastDonationDate: '2026-01-15',
     isAvailable: false, // UNAVAILABLE
     searchRadiusKm: 10,
-    whatsappConsent: true,
     preferredLanguage: 'hi',
     createdAt: '2026-01-20T00:00:00Z',
   },
   {
-    id: 'donor-manish-no-consent',
+    id: 'donor-manish-no-push-subscription',
     userId: 'user-8',
     name: 'Manish Joshi',
     phone: '+919877788899',
@@ -532,7 +524,6 @@ export const SEED_DONORS: SeedDonor[] = [
     lastDonationDate: '2026-02-10',
     isAvailable: true,
     searchRadiusKm: 10,
-    whatsappConsent: false, // NO WHATSAPP CONSENT
     preferredLanguage: 'en',
     createdAt: '2026-02-01T00:00:00Z',
   },
@@ -553,7 +544,6 @@ export const SEED_DONORS: SeedDonor[] = [
     lastDonationDate: '2026-03-01',
     isAvailable: true,
     searchRadiusKm: 50,
-    whatsappConsent: true,
     preferredLanguage: 'hi',
     createdAt: '2026-03-10T00:00:00Z',
   },
@@ -574,7 +564,6 @@ export const SEED_DONORS: SeedDonor[] = [
     lastDonationDate: '2026-05-10',
     isAvailable: true,
     searchRadiusKm: 10,
-    whatsappConsent: true,
     preferredLanguage: 'hi',
     createdAt: '2026-03-12T00:00:00Z',
   },
@@ -595,7 +584,6 @@ export const SEED_DONORS: SeedDonor[] = [
     lastDonationDate: '2026-04-05',
     isAvailable: true,
     searchRadiusKm: 10,
-    whatsappConsent: true,
     preferredLanguage: 'en',
     createdAt: '2026-03-15T00:00:00Z',
   },
@@ -616,7 +604,6 @@ export const SEED_DONORS: SeedDonor[] = [
     lastDonationDate: '2026-06-20',
     isAvailable: true,
     searchRadiusKm: 10,
-    whatsappConsent: true,
     preferredLanguage: 'hi',
     createdAt: '2026-03-20T00:00:00Z',
   },

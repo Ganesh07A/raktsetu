@@ -1,13 +1,12 @@
 import {
   getCompatibleDonorGroups,
   haversineDistance,
-  getBoundingBox,
   DONATION_INTERVAL_DAYS,
   type BloodGroup,
   type Gender,
   type DonorProfile,
 } from '@repo/shared';
-import { db, donorProfiles, users, eq, and } from '@repo/db';
+import { db, donorProfiles, donorPushSubscriptions, users, eq } from '@repo/db';
 import { mockStore } from './mock-store';
 
 export interface DonorEligibilityAssessment {
@@ -30,7 +29,6 @@ export interface MatchedDonor {
   longitude: number;
   distanceKm: number;
   isAvailable: boolean;
-  whatsappConsent: boolean;
   lastDonationDate: string | null;
   isEligibleSoft: boolean;
   isEligible: boolean;
@@ -147,7 +145,6 @@ export class DonorMatcherService {
             lastDonationDate: donorProfiles.lastDonationDate,
             isAvailable: donorProfiles.isAvailable,
             searchRadiusKm: donorProfiles.searchRadiusKm,
-            whatsappConsent: donorProfiles.whatsappConsent,
             createdAt: donorProfiles.createdAt,
             updatedAt: donorProfiles.updatedAt,
             name: users.name,
@@ -156,14 +153,10 @@ export class DonorMatcherService {
           })
           .from(donorProfiles)
           .innerJoin(users, eq(donorProfiles.userId, users.id))
-          .where(
-            and(
-              eq(donorProfiles.isAvailable, true),
-              eq(donorProfiles.whatsappConsent, true)
-            )
-          );
+          .innerJoin(donorPushSubscriptions, eq(donorPushSubscriptions.donorId, donorProfiles.id))
+          .where(eq(donorProfiles.isAvailable, true));
 
-        candidateDonors = rows.map((r) => ({
+        candidateDonors = [...new Map(rows.map((r) => [r.id, r])).values()].map((r) => ({
           id: r.id,
           userId: r.userId,
           bloodGroup: r.bloodGroup as BloodGroup,
@@ -178,7 +171,6 @@ export class DonorMatcherService {
           lastDonationDate: r.lastDonationDate,
           isAvailable: r.isAvailable,
           searchRadiusKm: r.searchRadiusKm,
-          whatsappConsent: r.whatsappConsent,
           createdAt: r.createdAt,
           updatedAt: r.updatedAt,
           name: r.name ?? 'Volunteer Donor',
@@ -199,8 +191,8 @@ export class DonorMatcherService {
     const matchedList: MatchedDonor[] = [];
 
     for (const donor of candidateDonors) {
-      // 1. Availability and WhatsApp Consent filters
-      if (!donor.isAvailable || !donor.whatsappConsent) {
+      // 1. Availability and active push subscription are checked before matching.
+      if (!donor.isAvailable) {
         continue;
       }
 
@@ -237,7 +229,6 @@ export class DonorMatcherService {
           longitude: donor.longitude,
           distanceKm: dist,
           isAvailable: donor.isAvailable,
-          whatsappConsent: donor.whatsappConsent,
           lastDonationDate: donor.lastDonationDate,
           isEligibleSoft: assessment.eligible,
           isEligible: assessment.eligible,
@@ -260,7 +251,7 @@ export class DonorMatcherService {
   }
 
   private getCandidatesFromMockStore() {
-    return mockStore.getDonors().map((d) => {
+    return mockStore.getDonors().filter((d) => mockStore.hasPushSubscription(d.id)).map((d) => {
       const anyD = d as any;
       return {
         ...d,

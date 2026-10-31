@@ -4,3 +4,5 @@ export * from './blood-requests';
 export * from './donor-notifications';
 export * from './blood-banks';
 export * from './blood-stock';
+
+export * from './donor-push-subscriptions';
