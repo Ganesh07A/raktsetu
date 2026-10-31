@@ -35,10 +35,15 @@ try {
         tag: data.tag || `raktsetu-${data.requestId || 'alert'}`,
         requireInteraction: true,
         data: { responsePath: data.responsePath || '/' },
-        actions: [
-          { action: 'accept', title: "I'm available" },
-          { action: 'decline', title: 'Not available' },
-        ],
+        actions: data.language === 'hi'
+          ? [
+              { action: 'accept', title: 'मैं उपलब्ध हूँ' },
+              { action: 'decline', title: 'अभी उपलब्ध नहीं' },
+            ]
+          : [
+              { action: 'accept', title: "I'm available" },
+              { action: 'decline', title: 'Not available' },
+            ],
       });
     });
   }

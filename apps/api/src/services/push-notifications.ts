@@ -53,7 +53,7 @@ export class PushNotificationService {
       return { success: false, messageId: null, mode: 'disabled', invalidTokens: [] };
     }
 
-    const title = 'A patient needs your help!';
+    const title = params.language === 'hi' ? 'आपकी मदद की ज़रूरत है!' : 'A patient needs your help!';
     const article = /^[AO]/i.test(params.bloodGroup) ? 'An' : 'A';
     const body = params.language === 'hi'
       ? `आपके निकट ${params.bloodGroup} रक्तदाता की तत्काल आवश्यकता है।`
@@ -93,6 +93,7 @@ export class PushNotificationService {
           body,
           requestId: params.requestId,
           responseToken: params.responseToken,
+          language: params.language || 'en',
           responsePath,
           icon: '/icons/icon-192x192.png',
           tag: `blood-request-${params.requestId}`,

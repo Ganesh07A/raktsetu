@@ -17,10 +17,16 @@ export function ForegroundPushListener() {
         badge: '/icons/icon-192x192.png',
         tag: data.tag || `raktsetu-${data.requestId || 'alert'}`,
         data: { responsePath: data.responsePath || '/' },
-        actions: [
-          { action: 'accept', title: "I'm available" },
-          { action: 'decline', title: 'Not available' },
-        ],
+        requireInteraction: true,
+        actions: data.language === 'hi'
+          ? [
+              { action: 'accept', title: 'मैं उपलब्ध हूँ' },
+              { action: 'decline', title: 'अभी उपलब्ध नहीं' },
+            ]
+          : [
+              { action: 'accept', title: "I'm available" },
+              { action: 'decline', title: 'Not available' },
+            ],
       });
     }).then((stop) => { if (active) unsubscribe = stop; else stop(); }).catch((error) => {
       console.warn('[Push] Foreground listener unavailable:', error);
