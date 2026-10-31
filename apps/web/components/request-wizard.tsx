@@ -1393,6 +1393,14 @@ export function RequestWizard() {
                   ? `${displayBanks.length} बैंक उपलब्ध (${selectedDistrict}, ${selectedState}) · ${selectedBloodGroup || 'AB+'} और संगत`
                   : `Showing ${displayBanks.length} Bank(s) in ${selectedDistrict}, ${selectedState} · ${selectedBloodGroup || 'AB+'} & Compatible`}
               </div>
+
+              {displayBanks.some((bank: any) => typeof bank.distanceKm !== 'number') && (
+                <p className="mx-auto mt-2 max-w-2xl text-center text-[11px] leading-relaxed text-amber-800">
+                  {isHi
+                    ? 'कुछ आधिकारिक स्टॉक रिकॉर्ड में बैंक के GPS निर्देशांक नहीं हैं। ऐसे रिकॉर्ड ज़िला-स्तर पर दिखाए जाते हैं; उनकी 25/50/100 किमी दूरी सत्यापित नहीं की जा सकती और वे मानचित्र पर नहीं दिखेंगे।'
+                    : 'Some official stock records do not include bank GPS coordinates. They are shown as district-level stock results; their 25/50/100 km distance cannot be verified and they will not appear as map pins.'}
+                </p>
+              )}
             </div>
 
             {/* Scrollable Blood Banks Cards List */}
