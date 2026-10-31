@@ -18,19 +18,13 @@ import {
 } from '@repo/ui/dialog';
 import { MapView, type MapMarkerItem } from '@/components/map-view';
 import {
-  Search,
   Building2,
-  Users,
   PhoneCall,
   Navigation,
   ShieldCheck,
-  AlertTriangle,
-  ArrowRight,
   Send,
-  Droplet,
-  Clock,
-  Sparkles,
   RefreshCw,
+  Info,
 } from 'lucide-react';
 import {
   getCompatibleDonorGroups,
@@ -48,8 +42,11 @@ export default function SearchResultsPage() {
 
   // URL parameters
   const bloodGroup = (searchParams.get('bloodGroup') as BloodGroup) || 'O+';
-  const lat = parseFloat(searchParams.get('lat') || '28.5672');
-  const lng = parseFloat(searchParams.get('lng') || '77.2100');
+  const latParam = searchParams.get('lat');
+  const lngParam = searchParams.get('lng');
+  const lat = latParam ? Number(latParam) : 20.5937;
+  const lng = lngParam ? Number(lngParam) : 78.9629;
+  const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng) && Boolean(latParam) && Boolean(lngParam);
   const radiusKm = (parseInt(searchParams.get('radiusKm') || '10') || 10) as RadiusPreset;
   const componentType = (searchParams.get('componentType') as ComponentType) || 'whole_blood';
   const unitsNeeded = parseInt(searchParams.get('unitsNeeded') || '1') || 1;
@@ -59,13 +56,12 @@ export default function SearchResultsPage() {
   // Data fetching states
   const [loading, setLoading] = React.useState(true);
   const [banks, setBanks] = React.useState<BloodBankCardData[]>([]);
-  const [compatibleDonorsCount, setCompatibleDonorsCount] = React.useState<number | null>(null);
-  const [compatibleDonors, setCompatibleDonors] = React.useState<any[]>([]);
+  const [hasCompatibleDonors, setHasCompatibleDonors] = React.useState<boolean | null>(null);
 
   // Emergency broadcast modal states
   const [isBroadcastOpen, setIsBroadcastOpen] = React.useState(false);
   const [patientName, setPatientName] = React.useState('');
-  const [hospitalName, setHospitalName] = React.useState(district ? `${district} Hospital` : 'AIIMS Delhi');
+  const [hospitalName, setHospitalName] = React.useState('');
   const [isBroadcasting, setIsBroadcasting] = React.useState(false);
   const [broadcastError, setBroadcastError] = React.useState<string | null>(null);
 
@@ -109,9 +105,11 @@ export default function SearchResultsPage() {
         if (donorRes.ok) {
           const donorData = await donorRes.json();
           if (isMounted) {
-            setCompatibleDonorsCount(donorData.count ?? donorData.donors?.length ?? 0);
-            setCompatibleDonors(donorData.donors || []);
+            // Only expose whether a fallback exists, not donor identities before acceptance.
+            setHasCompatibleDonors(Array.isArray(donorData.donors) && donorData.donors.length > 0);
           }
+        } else if (isMounted) {
+          setHasCompatibleDonors(false);
         }
       } catch (err) {
         console.error('Failed to load search results:', err);
@@ -154,8 +152,8 @@ export default function SearchResultsPage() {
           latitude: lat,
           longitude: lng,
           searchRadiusKm: radiusKm,
-          state: state || 'Delhi',
-          district: district || 'South Delhi',
+          ...(state ? { state } : {}),
+          ...(district ? { district } : {}),
           emergencyType: 'surgery',
         }),
       });
@@ -168,54 +166,31 @@ export default function SearchResultsPage() {
       const data = await res.json();
       if (data.request?.id) {
         router.push(`/request/${data.request.id}`);
+        return;
       }
+      throw new Error('The API did not return a request ID.');
     } catch (err: any) {
       setBroadcastError(err.message || 'Error broadcasting emergency alert');
       setIsBroadcasting(false);
     }
   };
 
-  // Prepare map markers
-  const mapMarkers: MapMarkerItem[] = React.useMemo(() => {
-    const list: MapMarkerItem[] = [];
-
-    // Add blood bank markers
-    banks.forEach((b) => {
-      if (b.latitude && b.longitude) {
-        list.push({
-          id: b.id,
-          name: b.name,
-          latitude: b.latitude,
-          longitude: b.longitude,
-          type: 'bank',
-          address: b.address,
-          phone: b.phone,
-          distanceKm: b.distanceKm,
-          isVerified: b.isVerified,
-          stock: b.stock,
-        });
-      }
-    });
-
-    // Add compatible donor markers if fallback stage
-    if (banks.length === 0 && compatibleDonors.length > 0) {
-      compatibleDonors.forEach((d) => {
-        if (d.latitude && d.longitude) {
-          list.push({
-            id: d.id,
-            name: d.name ? `Donor (${d.bloodGroup})` : `Volunteer (${d.bloodGroup})`,
-            latitude: d.latitude,
-            longitude: d.longitude,
-            type: 'donor',
-            distanceKm: d.distanceKm,
-            stock: [{ bloodGroup: d.bloodGroup, componentType: 'whole_blood', unitsAvailable: 1 }],
-          });
-        }
-      });
-    }
-
-    return list;
-  }, [banks, compatibleDonors]);
+  // Only plot blood banks when the source provides their real coordinates.
+  const mapMarkers: MapMarkerItem[] = React.useMemo(() => banks.flatMap((bank) => {
+    if (bank.latitude === null || bank.longitude === null) return [];
+    return [{
+      id: bank.id,
+      name: bank.name,
+      latitude: bank.latitude,
+      longitude: bank.longitude,
+      type: 'bank' as const,
+      address: bank.address || undefined,
+      phone: bank.phone || undefined,
+      ...(bank.distanceKm !== null ? { distanceKm: bank.distanceKm } : {}),
+      isVerified: bank.isVerified,
+      stock: bank.stock,
+    }];
+  }), [banks]);
 
   const compatibleGroups = getCompatibleDonorGroups(bloodGroup);
 
@@ -262,7 +237,7 @@ export default function SearchResultsPage() {
         </div>
         <MapView
           center={[lat, lng]}
-          userLocation={[lat, lng]}
+          userLocation={hasCoordinates ? [lat, lng] : undefined}
           radiusKm={radiusKm}
           markers={mapMarkers}
           height="360px"
@@ -341,7 +316,7 @@ export default function SearchResultsPage() {
                           {availableUnits} {isHi ? 'यूनिट उपलब्ध' : 'Units Available'}
                         </Badge>
                         <Badge variant="outline" className="text-xs font-semibold text-slate-700">
-                          {bank.distanceKm.toFixed(1)} km
+                          {bank.distanceKm !== null ? `${bank.distanceKm.toFixed(1)} km` : (isHi ? 'दूरी उपलब्ध नहीं' : 'Distance unavailable')}
                         </Badge>
                       </div>
                     </div>
@@ -379,7 +354,7 @@ export default function SearchResultsPage() {
                         </a>
                       )}
 
-                      {bank.latitude && bank.longitude && (
+                      {bank.latitude !== null && bank.longitude !== null && (
                         <a
                           href={`https://www.google.com/maps/dir/?api=1&destination=${bank.latitude},${bank.longitude}`}
                           target="_blank"
@@ -397,16 +372,16 @@ export default function SearchResultsPage() {
             })}
           </div>
 
-          {/* Secondary Action: Also trigger WhatsApp cascade if family wants additional donors */}
+          {/* Push-notification donor fallback */}
           <div className="p-4 rounded-xl border border-dashed border-red-200 bg-red-50/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div>
               <p className="text-xs font-bold text-slate-900">
-                {isHi ? 'क्या आपको अतिरिक्त यूनिट्स की आवश्यकता है?' : 'Need More Units or Backup Donors?'}
+                {isHi ? 'क्या आपको अतिरिक्त रक्तदाता सहायता चाहिए?' : 'Need volunteer donor support?'}
               </p>
               <p className="text-xs text-slate-600 mt-0.5">
                 {isHi
-                  ? `आस-पास ${compatibleDonorsCount ?? 0} संगत स्वयंसेवी रक्तदाता उपलब्ध हैं।`
-                  : `${compatibleDonorsCount ?? 0} compatible volunteer donors are nearby.`}
+                  ? (hasCompatibleDonors ? 'इस क्षेत्र में सूचना-सक्षम संगत रक्तदाता उपलब्ध हैं।' : 'अभी कोई सक्रिय सूचना-सक्षम संगत रक्तदाता नहीं मिला।')
+                  : (hasCompatibleDonors ? 'Compatible donors with active push alerts are available in this area.' : 'No compatible donors with active push alerts were found in this area.')}
               </p>
             </div>
             <Button
@@ -416,134 +391,39 @@ export default function SearchResultsPage() {
               className="border-red-300 text-red-700 hover:bg-red-100 font-bold shrink-0"
             >
               <Send className="h-3.5 w-3.5 mr-1" />
-              <span>{isHi ? 'दाताओं को बैकअप अलर्ट भेजें' : 'Broadcast to Donors'}</span>
+              <span>{isHi ? 'पुश अनुरोध भेजें' : 'Send push request'}</span>
             </Button>
           </div>
         </section>
       )}
 
-      {/* STAGE 2: Dynamic Volunteer Donor Fallback (When No Bank Has Stock) */}
+      {/* STAGE 2: Push fallback when no bank inventory is returned */}
       {!loading && banks.length === 0 && (
-        <section className="space-y-6">
-          {/* Prominent Emergency Fallback Alert Banner */}
-          <div className="rounded-2xl border-2 border-red-500 bg-gradient-to-br from-red-600 to-red-800 text-white p-6 sm:p-8 shadow-lg space-y-4">
-            <div className="flex items-start gap-4">
-              <div className="p-3 rounded-full bg-white/20 backdrop-blur-xs text-white shrink-0 mt-1">
-                <AlertTriangle className="h-8 w-8 text-amber-300 animate-bounce" />
-              </div>
-              <div className="space-y-2">
-                <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-amber-400 text-slate-900 text-xs font-black">
-                  <Sparkles className="h-3.5 w-3.5" />
-                  <span>{isHi ? 'चरण 2: स्वतः रक्तदाता नेटवर्क सक्रिय' : 'Stage 2: Community Donor Cascade'}</span>
-                </div>
-                <h2 className="text-xl sm:text-3xl font-black tracking-tight leading-snug">
-                  {isHi
-                    ? `चुने गए ${radiusKm} किमी दायरे में ${bloodGroup} ब्लड बैंक स्टॉक उपलब्ध नहीं है।`
-                    : `No blood banks found with available stock within ${radiusKm} km radius.`}
-                </h2>
-                <p className="text-sm sm:text-base text-red-100 leading-relaxed max-w-2xl">
-                  {isHi
-                    ? 'घबराएं नहीं! रक्तखोज ने आपके निकटतम संगत स्वयंसेवी रक्तदाताओं की पहचान कर ली है। नीचे दिए गए बटन से तुरंत आपातकालीन व्हाट्सएप संदेश भेजें।'
-                    : 'Searching for compatible volunteer donors... We can immediately dispatch WhatsApp emergency alert messages with interactive Accept buttons.'}
-                </p>
-              </div>
-            </div>
-
-            {/* Compatible Blood Groups Box */}
-            <div className="p-4 rounded-xl bg-red-900/40 border border-white/20 backdrop-blur-xs">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-bold text-red-200 uppercase tracking-wider">
-                    {isHi ? 'संगत लाल रक्त कोशिका (RBC) समूह:' : 'Compatible Donor Blood Groups:'}
-                  </p>
-                  <div className="flex flex-wrap gap-1.5 mt-1.5">
-                    {compatibleGroups.map((group) => (
-                      <span
-                        key={group}
-                        className="inline-flex items-center px-2.5 py-1 rounded-md bg-white text-red-900 font-extrabold text-sm shadow-xs"
-                      >
-                        {group}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="text-left sm:text-right">
-                  <p className="text-xs text-red-200">
-                    {isHi ? 'निकटतम संगत दाता' : 'Compatible Donors Nearby'}
-                  </p>
-                  <p className="text-2xl sm:text-3xl font-black text-amber-300">
-                    {compatibleDonorsCount !== null ? compatibleDonorsCount : '...'} {isHi ? 'दाता मिले' : 'Donors'}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Primary Action Button */}
-            <div className="pt-2">
-              <Button
-                onClick={() => setIsBroadcastOpen(true)}
-                size="lg"
-                className="w-full h-14 bg-white text-red-700 hover:bg-red-50 font-black text-base sm:text-lg rounded-xl shadow-xl flex items-center justify-center gap-2 active:scale-98 transition-all"
-              >
-                <Send className="h-5 w-5 text-red-600" />
-                <span>
-                  {isHi
-                    ? `संगत रक्तदाताओं को आपातकालीन व्हाट्सएप अलर्ट भेजें`
-                    : `Broadcast Emergency WhatsApp Alert to Compatible Donors`}
-                </span>
-                <ArrowRight className="h-5 w-5 text-red-500 ml-1" />
+        <section className="space-y-4">
+          <Card className="border border-slate-200">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Info className="h-5 w-5 text-slate-600" />
+                {isHi ? 'रक्तदाता सहायता उपलब्धता' : 'Volunteer donor fallback'}
+              </CardTitle>
+              <CardDescription>
+                {isHi
+                  ? 'रक्तदाता का नाम या संपर्क विवरण उसकी स्वीकृति से पहले नहीं दिखाया जाएगा।'
+                  : 'Donor identities and contact details stay private until a donor accepts your request.'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-slate-700">
+                {hasCompatibleDonors
+                  ? (isHi ? 'इस क्षेत्र में संगत और सूचना-सक्षम रक्तदाता हैं। आपातकालीन अनुरोध भेजने पर उन्हें पुश अलर्ट भेजा जाएगा।' : 'Compatible donors with active push subscriptions are available in this area. Send an emergency request to notify them.')
+                  : (isHi ? 'अभी इस क्षेत्र में संगत और सूचना-सक्षम रक्तदाता नहीं मिले।' : 'No compatible registered donors with active push subscriptions were found in this area right now.')}
+              </p>
+              <Button onClick={() => setIsBroadcastOpen(true)} className="w-full bg-red-600 text-white hover:bg-red-700">
+                <Send className="mr-2 h-4 w-4" />
+                {isHi ? 'आपातकालीन पुश अनुरोध भेजें' : 'Create emergency push request'}
               </Button>
-            </div>
-          </div>
-
-          {/* Donor Directory Preview Card */}
-          {compatibleDonors.length > 0 && (
-            <Card className="border border-slate-200">
-              <CardHeader className="p-4 sm:p-5 pb-3">
-                <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
-                  <Users className="h-5 w-5 text-emerald-600" />
-                  <span>
-                    {isHi
-                      ? `सक्रिय स्वयंसेवी रक्तदाता (${compatibleDonors.length})`
-                      : `Active Volunteer Donors Within Radius (${compatibleDonors.length})`}
-                  </span>
-                </CardTitle>
-                <CardDescription className="text-xs text-slate-500">
-                  {isHi
-                    ? 'गोपनीयता के लिए संपर्क नंबर सुरक्षित रखे गए हैं। दाता द्वारा स्वीकृति दिए जाने पर तुरंत लाइव वेटिंग रूम में प्रदर्शित होंगे।'
-                    : 'Contact numbers are masked for privacy until a donor accepts your emergency notification.'}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-4 sm:p-5 pt-0">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {compatibleDonors.map((donor) => (
-                    <div
-                      key={donor.id}
-                      className="p-3 rounded-lg border border-slate-200 bg-slate-50/60 flex items-center justify-between"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-800 font-extrabold text-sm flex items-center justify-center">
-                          {donor.bloodGroup}
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold text-slate-900">
-                            {donor.name || 'Volunteer Donor'}
-                          </p>
-                          <p className="text-[11px] text-slate-500">
-                            {donor.distanceKm !== undefined ? `${donor.distanceKm.toFixed(1)} km away` : 'Within radius'}
-                          </p>
-                        </div>
-                      </div>
-                      <Badge variant="outline" className="text-[10px] bg-white text-emerald-700 border-emerald-300">
-                        {isHi ? 'उपलब्ध' : 'Available'}
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+            </CardContent>
+          </Card>
         </section>
       )}
 
@@ -554,13 +434,13 @@ export default function SearchResultsPage() {
             <div className="flex items-center gap-2 text-red-600">
               <Droplet className="h-5 w-5 fill-current" />
               <DialogTitle className="text-lg font-bold text-slate-900">
-                {isHi ? 'आपातकालीन व्हाट्सएप अलर्ट भेजें' : 'Send Emergency WhatsApp Broadcast'}
+                {isHi ? 'आपातकालीन पुश अनुरोध भेजें' : 'Send Emergency Push Request'}
               </DialogTitle>
             </div>
             <DialogDescription className="text-xs text-slate-600 pt-1">
               {isHi
-                ? `यह अनुरोध ${bloodGroup} के सभी ${compatibleDonorsCount ?? ''} संगत रक्तदाताओं को व्हाट्सएप इंटरैक्टिव बटन के साथ तुरंत भेजा जाएगा।`
-                : `This will dispatch immediate WhatsApp notifications with Accept/Decline buttons to all ${compatibleDonorsCount ?? ''} compatible donors.`}
+                ? 'यह अनुरोध केवल इस क्षेत्र के संगत और पुश-सूचना चालू रखने वाले रक्तदाताओं को भेजा जाएगा।'
+                : 'This request will be sent only to compatible nearby donors who have enabled push notifications.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -625,7 +505,7 @@ export default function SearchResultsPage() {
                 className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white font-bold"
               >
                 <Send className="h-4 w-4 mr-1.5" />
-                <span>{isHi ? 'तुरंत अलर्ट भेजें' : 'Broadcast Alert Now'}</span>
+                <span>{isHi ? 'पुश अनुरोध भेजें' : 'Send push request'}</span>
               </Button>
             </DialogFooter>
           </form>
