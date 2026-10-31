@@ -10,6 +10,7 @@ import {
 import { db, users, donorProfiles, eq, or } from '@repo/db';
 import { mockStore } from '../services/mock-store';
 import { donorMatcher } from '../services/donor-matcher';
+import { createDonorSessionToken } from '../services/donor-session';
 
 export const donorRoutes = new Hono();
 
@@ -54,14 +55,6 @@ donorRoutes.post('/register', async (c) => {
     return c.json({ error: `Invalid blood group: ${body.bloodGroup}` }, 400);
   }
 
-  // Validate mandatory WhatsApp consent
-  if (body.whatsappConsent !== true) {
-    return c.json(
-      { error: 'Consent to receive WhatsApp notifications is required' },
-      400
-    );
-  }
-
   // Validate coordinates
   if (
     typeof body.latitude !== 'number' ||
@@ -98,7 +91,6 @@ donorRoutes.post('/register', async (c) => {
     lastDonationDate: body.lastDonationDate || null,
     isAvailable: body.isAvailable ?? true,
     searchRadiusKm: body.searchRadiusKm || 10,
-    whatsappConsent: true,
     createdAt: now,
     updatedAt: now,
   };
@@ -152,7 +144,6 @@ donorRoutes.post('/register', async (c) => {
           lastDonationDate: body.lastDonationDate || null,
           isAvailable: body.isAvailable ?? true,
           searchRadiusKm: body.searchRadiusKm || 10,
-          whatsappConsent: true,
         });
       });
     } catch (err: any) {
@@ -187,7 +178,7 @@ donorRoutes.post('/register', async (c) => {
 
   mockStore.addDonor(newDonor);
 
-  const token = `jwt-donor-token-${donorId}`;
+  const token = createDonorSessionToken(donorId);
 
   return c.json(
     {
