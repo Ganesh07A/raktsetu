@@ -292,14 +292,35 @@ export function RequestWizard() {
         }
       }
 
-      // 3. Match against official Pan-India 36 States & 781 Districts
-      const matched = matchStateAndDistrict(stateName, districtName);
-      setSelectedState(matched.state);
-      setSelectedDistrict(matched.district);
-      setIsLocationResolved(true);
+      // 3. Apply reverse-geocoded state/district only when they match the official list.
+      // Never let the shared helper's old Mumbai default override the actual GPS coordinates.
+      const normalizedState = ALL_INDIAN_STATES.find(
+        (candidate) => candidate.toLowerCase() === stateName.trim().toLowerCase()
+      );
 
-      const finalDisplay = displayName || `${matched.district}, ${matched.state}`;
-      setDetectedLocationName(finalDisplay);
+      if (normalizedState && districtName.trim()) {
+        const validDistricts = getDistrictsForState(normalizedState) || [];
+        const normalizedDistrict = validDistricts.find((candidate) => {
+          const districtLower = candidate.toLowerCase();
+          const geocoderDistrict = districtName.trim().toLowerCase();
+          return districtLower === geocoderDistrict ||
+            districtLower.includes(geocoderDistrict) ||
+            geocoderDistrict.includes(districtLower);
+        });
+
+        setSelectedState(normalizedState);
+        setSelectedDistrict(normalizedDistrict || '');
+        setDetectedLocationName(
+          displayName || [districtName, normalizedState].filter(Boolean).join(', ')
+        );
+      } else {
+        // GPS is still valid even if the reverse-geocoder cannot identify a district.
+        // Keep the user's current state selection but do not invent a district.
+        setSelectedDistrict('');
+        setDetectedLocationName(displayName || (isHi ? 'जीपीएस स्थान' : 'GPS location'));
+      }
+
+      setIsLocationResolved(true);
       setIsGpsActive(true);
       setLocationError(null);
     } catch (err) {
