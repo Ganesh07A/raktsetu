@@ -57,6 +57,8 @@ export default function SearchResultsPage() {
   // Data fetching states
   const [loading, setLoading] = React.useState(true);
   const [banks, setBanks] = React.useState<BloodBankCardData[]>([]);
+  const hasMeasuredBankDistances = banks.some((bank) => bank.distanceKm !== null);
+  const hasUnknownBankDistances = banks.some((bank) => bank.distanceKm === null);
   const [hasCompatibleDonors, setHasCompatibleDonors] = React.useState<boolean | null>(null);
 
   // Emergency broadcast modal states
@@ -268,15 +270,23 @@ export default function SearchResultsPage() {
                 </span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                {isHi
-                  ? 'निकटता के क्रम में व्यवस्थित। तुरंत संपर्क करने के लिए कॉल करें।'
-                  : 'Sorted by proximity to your search coordinates.'}
+                {hasMeasuredBankDistances
+                  ? (isHi ? 'पहले उपलब्ध स्टॉक, फिर मापी गई दूरी के क्रम में।' : 'Matching stock first, then measured distance where available.')
+                  : (isHi ? 'स्टॉक उपलब्धता के अनुसार। दूरी का डेटा उपलब्ध नहीं है।' : 'Ordered by stock availability. Distance data is not available for these records.')}
               </p>
             </div>
             <Badge variant="success" className="text-xs">
               {isHi ? 'स्टॉक उपलब्ध' : 'Stock In-Hand'}
             </Badge>
           </div>
+
+          {hasUnknownBankDistances && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
+              {isHi
+                ? 'कुछ आधिकारिक स्टॉक रिकॉर्ड में बैंक के GPS निर्देशांक नहीं हैं। ऐसे रिकॉर्ड ज़िला-स्तर पर दिखते हैं; उनकी 25/50/100 किमी दूरी सत्यापित नहीं की जा सकती और वे मानचित्र पर नहीं दिखेंगे।'
+                : 'Some official stock records do not include bank GPS coordinates. They are district-level results; their 25/50/100 km distance cannot be verified and they are not plotted on the map.'}
+            </p>
+          )}
 
           <div className="grid grid-cols-1 gap-4">
             {banks.map((bank) => {
