@@ -13,7 +13,7 @@ export const donorNotifications = pgTable(
     donorId: text('donor_id')
       .references(() => donorProfiles.id, { onDelete: 'cascade' })
       .notNull(),
-    whatsappMessageId: text('whatsapp_message_id'),
+    pushMessageId: text('push_message_id'),
     status: text('status', {
       enum: [
         'pending',
@@ -38,7 +38,7 @@ export const donorNotifications = pgTable(
       table.status
     ),
     index('notifications_donor_idx').on(table.donorId),
-    index('notifications_whatsapp_id_idx').on(table.whatsappMessageId),
+    index('notifications_push_id_idx').on(table.pushMessageId),
   ]
 );
 
