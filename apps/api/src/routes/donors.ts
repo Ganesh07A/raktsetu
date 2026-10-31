@@ -8,7 +8,7 @@ import {
 import { db, users, donorProfiles, donorNotifications, bloodRequests, eq, or, and, desc } from '@repo/db';
 import { mockStore } from '../services/mock-store';
 import { donorMatcher } from '../services/donor-matcher';
-import { createDonorSessionToken, verifyDonorSessionToken } from '../services/donor-session';
+import { createDonorSessionToken, verifyDonorSessionToken, createDonorResponseToken } from '../services/donor-session';
 
 export const donorRoutes = new Hono();
 
@@ -289,6 +289,28 @@ donorRoutes.get('/profile/:id', async (c) => {
       const row = rows[0];
       if (!row) return c.json({ error: 'Donor profile not found' }, 404);
 
+      const pendingRows = await db
+        .select({
+          notificationId: donorNotifications.id,
+          requestId: bloodRequests.id,
+          patientName: bloodRequests.patientName,
+          hospitalName: bloodRequests.hospitalName,
+          bloodGroupNeeded: bloodRequests.bloodGroupNeeded,
+          unitsNeeded: bloodRequests.unitsNeeded,
+          emergencyType: bloodRequests.emergencyType,
+          requestStatus: bloodRequests.status,
+          requestCreatedAt: bloodRequests.createdAt,
+          sentAt: donorNotifications.sentAt,
+        })
+        .from(donorNotifications)
+        .innerJoin(bloodRequests, eq(donorNotifications.requestId, bloodRequests.id))
+        .where(and(
+          eq(donorNotifications.donorId, id),
+          or(eq(donorNotifications.status, 'pending'), eq(donorNotifications.status, 'sent')),
+          eq(bloodRequests.status, 'donors_notified')
+        ))
+        .orderBy(desc(donorNotifications.sentAt));
+
       const historyRows = await db
         .select({
           requestId: bloodRequests.id,
@@ -316,6 +338,19 @@ donorRoutes.get('/profile/:id', async (c) => {
           createdAt: row.createdAt.toISOString(),
           updatedAt: row.updatedAt.toISOString(),
         },
+        pendingRequests: pendingRows.map((item) => ({
+          notificationId: item.notificationId,
+          requestId: item.requestId,
+          patientName: item.patientName,
+          hospitalName: item.hospitalName,
+          bloodGroupNeeded: item.bloodGroupNeeded,
+          unitsNeeded: item.unitsNeeded,
+          emergencyType: item.emergencyType,
+          requestStatus: item.requestStatus,
+          requestCreatedAt: item.requestCreatedAt.toISOString(),
+          sentAt: item.sentAt ? item.sentAt.toISOString() : null,
+          responseToken: createDonorResponseToken(item.requestId, id),
+        })),
         acceptedRequests: historyRows.map((item) => ({
           ...item,
           requestCreatedAt: item.requestCreatedAt.toISOString(),
@@ -352,6 +387,26 @@ donorRoutes.get('/profile/:id', async (c) => {
     .sort((a, b) => new Date(b.respondedAt || b.requestCreatedAt).getTime()
       - new Date(a.respondedAt || a.requestCreatedAt).getTime());
 
+  const pendingRequests = mockStore.getNotificationsForDonor(id)
+    .filter((notification) => notification.status === 'pending' || notification.status === 'sent')
+    .flatMap((notification) => {
+      const request = mockStore.getRequest(notification.requestId);
+      if (!request || request.status !== 'donors_notified') return [];
+      return [{
+        notificationId: notification.id,
+        requestId: request.id,
+        patientName: request.patientName,
+        hospitalName: request.hospitalName,
+        bloodGroupNeeded: request.bloodGroupNeeded,
+        unitsNeeded: request.unitsNeeded,
+        emergencyType: request.emergencyType,
+        requestStatus: request.status,
+        requestCreatedAt: request.createdAt,
+        sentAt: notification.sentAt,
+        responseToken: createDonorResponseToken(request.id, id),
+      }];
+    });
+
   return c.json({
     success: true,
     profile: {
@@ -360,6 +415,7 @@ donorRoutes.get('/profile/:id', async (c) => {
       phone: (donor as any).phone || null,
       preferredLanguage: (donor as any).preferredLanguage || 'en',
     },
+    pendingRequests,
     acceptedRequests,
     confirmedDonationsCount: 0,
   });

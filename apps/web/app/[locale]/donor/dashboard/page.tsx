@@ -13,6 +13,8 @@ import {
   Calendar,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
+  ArrowRight,
 } from 'lucide-react';
 import { PushNotificationOptIn } from '../../../components/push-notification-opt-in';
 
@@ -32,6 +34,20 @@ type DonorProfileView = {
   createdAt: string;
 };
 
+type PendingRequest = {
+  notificationId: string;
+  requestId: string;
+  patientName: string;
+  hospitalName: string;
+  bloodGroupNeeded: string;
+  unitsNeeded: number;
+  emergencyType: string;
+  requestStatus: string;
+  requestCreatedAt: string;
+  sentAt: string | null;
+  responseToken: string;
+};
+
 type AcceptedRequest = {
   requestId: string;
   patientName: string;
@@ -49,6 +65,7 @@ export default function DonorDashboardPage() {
   const [donorId, setDonorId] = React.useState<string | null>(null);
   const [profile, setProfile] = React.useState<DonorProfileView | null>(null);
   const [acceptedRequests, setAcceptedRequests] = React.useState<AcceptedRequest[]>([]);
+  const [pendingRequests, setPendingRequests] = React.useState<PendingRequest[]>([]);
   const [confirmedDonationsCount, setConfirmedDonationsCount] = React.useState(0);
   const [isAvailable, setIsAvailable] = React.useState(true);
   const [loading, setLoading] = React.useState(true);
@@ -90,12 +107,14 @@ export default function DonorDashboardPage() {
         setProfile(data.profile as DonorProfileView);
         setIsAvailable(Boolean(data.profile.isAvailable));
         setAcceptedRequests(Array.isArray(data.acceptedRequests) ? data.acceptedRequests : []);
+        setPendingRequests(Array.isArray(data.pendingRequests) ? data.pendingRequests : []);
         setConfirmedDonationsCount(Number(data.confirmedDonationsCount || 0));
       } catch (error) {
         if (controller.signal.aborted) return;
         setProfileError(error instanceof Error ? error.message : 'Unable to load donor profile.');
         setProfile(null);
         setAcceptedRequests([]);
+        setPendingRequests([]);
         setConfirmedDonationsCount(0);
       } finally {
         if (!controller.signal.aborted) setLoading(false);
@@ -215,6 +234,44 @@ export default function DonorDashboardPage() {
       </div>
 
       <PushNotificationOptIn />
+
+      {pendingRequests.length > 0 && (
+        <div className="space-y-3 rounded-2xl border-2 border-red-500 bg-red-50/80 p-5 shadow-lg">
+          <div className="flex items-center gap-2 text-red-600 font-black text-base sm:text-lg animate-pulse">
+            <AlertTriangle className="h-6 w-6" />
+            <span>{isHi ? '🚨 आपके लिए तत्काल रक्त आवश्यकता अनुरोध!' : '🚨 Urgent Blood Request For You!'}</span>
+          </div>
+          <p className="text-xs text-red-800">
+            {isHi
+              ? 'एक मरीज को आपके रक्त समूह की आवश्यकता है। कृपया तुरंत प्रतिक्रिया दें।'
+              : 'A patient near you urgently needs your blood group. Please respond immediately.'}
+          </p>
+          <div className="space-y-3 pt-2">
+            {pendingRequests.map((req) => (
+              <div key={req.requestId} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-xl border border-red-200 shadow-sm">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="destructive" className="font-bold text-xs">
+                      {req.bloodGroupNeeded} • {req.unitsNeeded} {isHi ? 'यूनिट' : 'Units'}
+                    </Badge>
+                    <span className="text-xs font-semibold text-slate-700">{req.hospitalName}</span>
+                  </div>
+                  <p className="text-sm font-bold text-slate-900">
+                    {isHi ? 'रोगी:' : 'Patient:'} {req.patientName}
+                  </p>
+                </div>
+                <Link
+                  href={`/donor/respond/${req.requestId}?responseToken=${encodeURIComponent(req.responseToken)}`}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold text-sm shadow transition"
+                >
+                  {isHi ? 'उत्तर दें (स्वीकार / अस्वीकार)' : 'Respond (Accept / Decline)'}
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {profileError && (
         <div role="alert" className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-800">

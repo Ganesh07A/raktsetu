@@ -18,6 +18,46 @@ self.addEventListener('notificationclick', (event) => {
   })());
 });
 
+// Native push event listener ensures system notifications always pop up on all platforms
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+  try {
+    let payload = {};
+    try {
+      payload = event.data.json();
+    } catch {
+      payload = { data: { body: event.data.text() } };
+    }
+    const data = payload.data || {};
+    const notif = payload.notification || {};
+    const title = notif.title || data.title || 'RaktSetu Blood Alert';
+    const body = notif.body || data.body || 'A nearby patient urgently needs your blood group.';
+    const responsePath = data.responsePath || notif.data?.responsePath || '/';
+
+    event.waitUntil(
+      self.registration.showNotification(title, {
+        body,
+        icon: data.icon || notif.icon || '/icons/icon-192x192.png',
+        badge: '/icons/icon-192x192.png',
+        tag: data.tag || notif.tag || `raktsetu-${data.requestId || 'alert'}`,
+        requireInteraction: true,
+        data: { responsePath },
+        actions: data.language === 'hi'
+          ? [
+              { action: 'accept', title: 'मैं उपलब्ध हूँ' },
+              { action: 'decline', title: 'अभी उपलब्ध नहीं' },
+            ]
+          : [
+              { action: 'accept', title: "I'm available" },
+              { action: 'decline', title: 'Not available' },
+            ],
+      })
+    );
+  } catch (err) {
+    console.warn('[SW] Native push event handler error:', err);
+  }
+});
+
 try {
   importScripts('/firebase-config.js');
   if (self.__RAKTSETU_FIREBASE_CONFIG__?.apiKey) {

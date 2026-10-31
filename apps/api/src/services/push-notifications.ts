@@ -88,6 +88,10 @@ export class PushNotificationService {
       const batch = tokens.slice(offset, offset + 500);
       const messages: Message[] = batch.map((token) => ({
         token,
+        notification: {
+          title,
+          body,
+        },
         data: {
           title,
           body,
@@ -98,7 +102,25 @@ export class PushNotificationService {
           icon: '/icons/icon-192x192.png',
           tag: `blood-request-${params.requestId}`,
         },
-        webpush: { headers: { TTL: '3600', Urgency: 'high' } },
+        webpush: {
+          headers: { TTL: '3600', Urgency: 'high' },
+          notification: {
+            title,
+            body,
+            icon: '/icons/icon-192x192.png',
+            badge: '/icons/icon-192x192.png',
+            tag: `blood-request-${params.requestId}`,
+            requireInteraction: true,
+            data: {
+              responsePath,
+              requestId: params.requestId,
+              responseToken: params.responseToken,
+            },
+          },
+          fcmOptions: {
+            link: responsePath,
+          },
+        },
       }));
 
       try {
