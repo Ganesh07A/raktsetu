@@ -1,8 +1,8 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 type SignedPayload = {
-  purpose: 'donor-session' | 'donor-response';
-  donorId: string;
+  purpose: 'donor-session' | 'donor-response' | 'request-close';
+  donorId?: string;
   requestId?: string;
   expiresAt: number;
 };
@@ -34,11 +34,13 @@ function verify(token: string, purpose: SignedPayload['purpose']): SignedPayload
     const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as SignedPayload;
     if (
       payload.purpose !== purpose ||
-      typeof payload.donorId !== 'string' ||
-      !payload.donorId ||
       !Number.isInteger(payload.expiresAt) ||
       payload.expiresAt <= Math.floor(Date.now() / 1000)
     ) return null;
+    if ((purpose === 'donor-session' || purpose === 'donor-response') &&
+      (typeof payload.donorId !== 'string' || !payload.donorId)) return null;
+    if ((purpose === 'donor-response' || purpose === 'request-close') &&
+      (typeof payload.requestId !== 'string' || !payload.requestId)) return null;
     return payload;
   } catch {
     return null;
@@ -70,4 +72,19 @@ export function createDonorResponseToken(requestId: string, donorId: string): st
 export function verifyDonorResponseToken(token: string): { requestId: string; donorId: string } | null {
   const payload = verify(token, 'donor-response');
   return payload?.requestId ? { requestId: payload.requestId, donorId: payload.donorId } : null;
+}
+
+
+/** Signed capability held by the seeker who created a request; permits closing only that request. */
+export function createRequestCloseToken(requestId: string): string {
+  return sign({
+    purpose: 'request-close',
+    requestId,
+    expiresAt: Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+  });
+}
+
+export function verifyRequestCloseToken(token: string): { requestId: string } | null {
+  const payload = verify(token, 'request-close');
+  return payload?.requestId ? { requestId: payload.requestId } : null;
 }
