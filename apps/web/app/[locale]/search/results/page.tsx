@@ -19,6 +19,7 @@ import {
 import { MapView, type MapMarkerItem } from '@/components/map-view';
 import {
   Building2,
+  Droplet,
   PhoneCall,
   Navigation,
   ShieldCheck,
