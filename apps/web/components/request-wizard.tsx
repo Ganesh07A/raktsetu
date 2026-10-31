@@ -36,7 +36,6 @@ import {
   getCompatibleDonorGroups,
   ALL_INDIAN_STATES,
   getDistrictsForState,
-  matchStateAndDistrict,
   type BloodGroup,
 } from '@repo/shared';
 
