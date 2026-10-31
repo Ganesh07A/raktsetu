@@ -97,9 +97,10 @@ export class MockDataStore {
     this.notifications.clear();
     this.pushSubscriptions.clear();
     this.outboundPush = [];
-    if (process.env.NODE_ENV === 'test') {
+    // Seeded demo donors are treated as opted-in sample devices in mock/local mode.
+    {
       for (const donor of this.donors) {
-        if (donor.id !== 'donor-manish-no-consent') this.addPushSubscription(donor.id, `test-fcm-token-${donor.id}-${'x'.repeat(48)}`);
+        if (donor.id !== 'donor-manish-no-push-subscription') this.addPushSubscription(donor.id, `test-fcm-token-${donor.id}-${'x'.repeat(48)}`);
       }
     }
   }

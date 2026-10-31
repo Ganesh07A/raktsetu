@@ -508,7 +508,7 @@ export const SEED_DONORS: SeedDonor[] = [
     createdAt: '2026-01-20T00:00:00Z',
   },
   {
-    id: 'donor-manish-no-consent',
+    id: 'donor-manish-no-push-subscription',
     userId: 'user-8',
     name: 'Manish Joshi',
     phone: '+919877788899',

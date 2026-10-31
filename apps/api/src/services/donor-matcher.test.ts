@@ -122,7 +122,7 @@ describe('DonorMatcherService', () => {
         radiusKm: 10,
       });
 
-      const noConsent = matches.find((m) => m.id === 'donor-manish-no-consent');
+      const noConsent = matches.find((m) => m.id === 'donor-manish-no-push-subscription');
       expect(noConsent).toBeUndefined();
     });
 

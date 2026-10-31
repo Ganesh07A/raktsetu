@@ -33,7 +33,7 @@ Do not deploy the new API before applying this migration.
 - Complete donor registration, then choose **Enable notifications** on the success screen or donor dashboard.
 - Grant browser notification permission.
 - Create a test blood request compatible with that donor.
-- Verify that a notification appears, then use its action or open it and choose Accept / Not available. The response uses a signed, expiring token and is recorded by the API.
+- Verify that a notification appears, then use its action or open it and choose Accept / Not available. The response uses a signed, expiring token and is recorded by the API. The response URL is a bearer link for up to 24 hours; avoid sharing it.
 
 For automated tests, the mock store seeds push subscriptions for its test donors and the push sender records mock deliveries without contacting Firebase.
 
