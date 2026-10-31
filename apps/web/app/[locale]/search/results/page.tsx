@@ -44,9 +44,11 @@ export default function SearchResultsPage() {
   const bloodGroup = (searchParams.get('bloodGroup') as BloodGroup) || 'O+';
   const latParam = searchParams.get('lat');
   const lngParam = searchParams.get('lng');
-  const lat = latParam ? Number(latParam) : 20.5937;
-  const lng = lngParam ? Number(lngParam) : 78.9629;
-  const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng) && Boolean(latParam) && Boolean(lngParam);
+  const parsedLat = latParam ? Number(latParam) : Number.NaN;
+  const parsedLng = lngParam ? Number(lngParam) : Number.NaN;
+  const hasCoordinates = Number.isFinite(parsedLat) && Number.isFinite(parsedLng);
+  const lat = hasCoordinates ? parsedLat : 20.5937;
+  const lng = hasCoordinates ? parsedLng : 78.9629;
   const radiusKm = (parseInt(searchParams.get('radiusKm') || '10') || 10) as RadiusPreset;
   const componentType = (searchParams.get('componentType') as ComponentType) || 'whole_blood';
   const unitsNeeded = parseInt(searchParams.get('unitsNeeded') || '1') || 1;
@@ -91,7 +93,7 @@ export default function SearchResultsPage() {
 
         // Check if banks have stock for the requested group
         const banksWithStock = foundBanks.filter((b) =>
-          b.stock?.some((s) => s.bloodGroup === bloodGroup && s.unitsAvailable > 0)
+          b.stock?.some((s) => s.bloodGroup === bloodGroup && s.componentType === componentType && s.unitsAvailable > 0)
         );
 
         if (isMounted) {
@@ -124,7 +126,7 @@ export default function SearchResultsPage() {
     };
   }, [bloodGroup, lat, lng, radiusKm, componentType, state, district]);
 
-  // Handle WhatsApp Emergency Broadcast Submission
+  // Create the request; the API matches donors with active push subscriptions and dispatches FCM.
   const handleBroadcastSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!patientName.trim()) {
@@ -165,7 +167,10 @@ export default function SearchResultsPage() {
 
       const data = await res.json();
       if (data.request?.id) {
-        router.push(`/request/${data.request.id}`);
+        const closeToken = typeof data.requestCloseToken === 'string'
+          ? `?closeToken=${encodeURIComponent(data.requestCloseToken)}`
+          : '';
+        router.push(`/request/${data.request.id}${closeToken}`);
         return;
       }
       throw new Error('The API did not return a request ID.');
@@ -279,7 +284,7 @@ export default function SearchResultsPage() {
           <div className="grid grid-cols-1 gap-4">
             {banks.map((bank) => {
               const matchedStock = bank.stock?.find(
-                (s) => s.bloodGroup === bloodGroup && s.unitsAvailable > 0
+                (s) => s.bloodGroup === bloodGroup && s.componentType === componentType && s.unitsAvailable > 0
               );
               const availableUnits = matchedStock?.unitsAvailable ?? 0;
 
