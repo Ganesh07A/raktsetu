@@ -196,8 +196,8 @@ export default function DonorRespondPage() {
             </a>
 
             <Button asChild variant="outline" className="border-slate-300 text-xs">
-              <Link href={`/request/${requestId}`}>
-                <span>{isHi ? 'वेटिंग रूम देखें' : 'View Waiting Room'}</span>
+              <Link href="/donor/dashboard">
+                <span>{isHi ? 'दाता डैशबोर्ड' : 'Donor Dashboard'}</span>
               </Link>
             </Button>
           </div>

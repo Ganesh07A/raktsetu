@@ -81,6 +81,37 @@ export function WaitingRoom({ requestId, requestCloseToken, initialData }: Waiti
     };
   }, [requestId]);
 
+  const prevDonorsCountRef = React.useRef(initialData?.acceptedDonors?.length || 0);
+
+  React.useEffect(() => {
+    if (acceptedDonors.length > prevDonorsCountRef.current) {
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+          osc.frequency.setValueAtTime(880, ctx.currentTime + 0.15);
+          osc.frequency.setValueAtTime(1174.66, ctx.currentTime + 0.3);
+          gain.gain.setValueAtTime(0.4, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.8);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.8);
+        }
+      } catch (e) {
+        console.warn('Audio playback error:', e);
+      }
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        navigator.vibrate([200, 100, 200, 100, 400]);
+      }
+    }
+    prevDonorsCountRef.current = acceptedDonors.length;
+  }, [acceptedDonors.length]);
+
   const isFulfilled = request?.status === 'fulfilled' || acceptedDonors.length > 0;
   const hasBankStock = request?.status === 'bank_found';
   const isClosed = request?.status === 'cancelled' || request?.status === 'expired';
@@ -131,6 +162,64 @@ export function WaitingRoom({ requestId, requestCloseToken, initialData }: Waiti
 
   return (
     <div className="mx-auto max-w-3xl space-y-5 p-4 sm:p-6">
+      {acceptedDonors.length > 0 && (
+        <section className="space-y-3 rounded-2xl border-2 border-emerald-500 bg-emerald-50/90 p-5 shadow-lg animate-in fade-in duration-300">
+          <div className="flex items-center gap-2">
+            <span className="flex h-3 w-3 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+            </span>
+            <HeartHandshake className="h-6 w-6 text-emerald-700" />
+            <h2 className="text-lg font-black text-emerald-950">
+              {isHi ? '🎉 रक्तदाता मिल गया! दाता ने आपका अनुरोध स्वीकार किया है:' : '🎉 Life Saver Found! A donor accepted your request:'}
+            </h2>
+          </div>
+          {acceptedDonors.map((donor) => {
+            const cleanPhone = donor.phone.replace(/[^0-9]/g, '');
+            return (
+              <Card key={donor.donorId} className="border-emerald-300 bg-white shadow-sm">
+                <CardContent className="flex flex-col justify-between gap-4 p-5 sm:flex-row sm:items-center">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-base font-black text-slate-900">{donor.name}</p>
+                      <Badge variant="success" className="font-bold text-xs">{donor.bloodGroup}</Badge>
+                    </div>
+                    <p className="text-xs text-slate-600 font-medium">
+                      {donor.distanceKm !== null && donor.distanceKm !== undefined
+                        ? `📍 ${donor.distanceKm.toFixed(1)} km away from patient`
+                        : (isHi ? 'दूरी उपलब्ध नहीं' : 'Distance unavailable')}
+                    </p>
+                    <p className="text-sm font-black text-emerald-800 font-mono tracking-wide">{donor.phone}</p>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <a
+                      href={`tel:${donor.phone}`}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-black text-white hover:bg-emerald-700 shadow transition"
+                    >
+                      <PhoneCall className="h-4 w-4" />
+                      {isHi ? 'रक्तदाता को कॉल करें' : 'Call Donor Now'}
+                    </a>
+                    {cleanPhone && (
+                      <a
+                        href={`https://wa.me/${cleanPhone}?text=${encodeURIComponent(
+                          isHi
+                            ? 'नमस्ते, RaktSetu पर रक्त दान अनुरोध स्वीकार करने के लिए धन्यवाद।'
+                            : 'Hello, thank you for accepting our blood donation request on RaktSetu.'
+                        )}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-green-600 px-4 py-3 text-sm font-bold text-white hover:bg-green-700 shadow transition"
+                      >
+                        WhatsApp
+                      </a>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </section>
+      )}
       <Card className={isFulfilled ? 'border-emerald-300 bg-emerald-50/50' : isClosed ? 'border-slate-300 bg-slate-50' : 'border-red-200'}>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between gap-3">
@@ -185,40 +274,6 @@ export function WaitingRoom({ requestId, requestCloseToken, initialData }: Waiti
           {loadError && <p role="alert" className="text-xs text-red-700">{loadError}</p>}
         </CardContent>
       </Card>
-
-      {acceptedDonors.length > 0 && (
-        <section className="space-y-3">
-          <div className="flex items-center gap-2">
-            <HeartHandshake className="h-5 w-5 text-emerald-700" />
-            <h2 className="text-lg font-bold text-slate-900">{isHi ? 'स्वीकृत रक्तदाता' : 'Donors who accepted'}</h2>
-          </div>
-          {acceptedDonors.map((donor) => (
-            <Card key={donor.donorId} className="border-emerald-200">
-              <CardContent className="flex flex-col justify-between gap-3 p-4 sm:flex-row sm:items-center">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="font-bold text-slate-900">{donor.name}</p>
-                    <Badge variant="outline">{donor.bloodGroup}</Badge>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-600">
-                    {donor.distanceKm !== null && donor.distanceKm !== undefined
-                      ? `${donor.distanceKm.toFixed(1)} km away`
-                      : (isHi ? 'दूरी उपलब्ध नहीं' : 'Distance unavailable')}
-                  </p>
-                  <p className="mt-1 text-sm font-semibold text-emerald-900">{donor.phone}</p>
-                </div>
-                <a
-                  href={`tel:${donor.phone}`}
-                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700"
-                >
-                  <PhoneCall className="h-4 w-4" />
-                  {isHi ? 'रक्तदाता को कॉल करें' : 'Call donor'}
-                </a>
-              </CardContent>
-            </Card>
-          ))}
-        </section>
-      )}
 
       {!isFulfilled && !hasBankStock && !isClosed && requestCloseToken && (
         <div className="space-y-2">

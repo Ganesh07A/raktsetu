@@ -13,6 +13,20 @@ export interface NearbyHospital {
 // Curated verified hospitals directory for key districts across India
 const CURATED_DISTRICT_HOSPITALS: Record<string, Omit<NearbyHospital, 'distanceKm'>[]> = {
   // --- Maharashtra ---
+  'Chhatrapati Sambhajinagar': [
+    { id: 'mh-gmch-csn', name: 'Government Medical College & Hospital (GMCH Ghati)', city: 'Ghati, Chhatrapati Sambhajinagar', lat: 19.8901, lng: 75.3182, type: 'Government' },
+    { id: 'mh-mgm-csn', name: 'MGM Medical College & Hospital', city: 'CIDCO, Chhatrapati Sambhajinagar', lat: 19.8781, lng: 75.3538, type: 'Charitable/Vol' },
+    { id: 'mh-hedgewar-csn', name: 'Dr. Hedgewar Hospital (Dattaji Bhale Blood Centre)', city: 'Garkheda, Chhatrapati Sambhajinagar', lat: 19.8693, lng: 75.348, type: 'Charitable/Vol' },
+    { id: 'mh-dhoot-csn', name: 'Seth Nandlal Dhoot Hospital', city: 'MIDC Chikalthana, Chhatrapati Sambhajinagar', lat: 19.8724, lng: 75.3875, type: 'Private' },
+    { id: 'mh-aurangabad-bb', name: 'Aurangabad Blood Bank & Research Institute', city: 'Osmanpura, Chhatrapati Sambhajinagar', lat: 19.8733, lng: 75.3449, type: 'Charitable/Vol' },
+  ],
+  'Aurangabad': [
+    { id: 'mh-gmch-csn', name: 'Government Medical College & Hospital (GMCH Ghati)', city: 'Ghati, Aurangabad', lat: 19.8901, lng: 75.3182, type: 'Government' },
+    { id: 'mh-mgm-csn', name: 'MGM Medical College & Hospital', city: 'CIDCO, Aurangabad', lat: 19.8781, lng: 75.3538, type: 'Charitable/Vol' },
+    { id: 'mh-hedgewar-csn', name: 'Dr. Hedgewar Hospital (Dattaji Bhale Blood Centre)', city: 'Garkheda, Aurangabad', lat: 19.8693, lng: 75.348, type: 'Charitable/Vol' },
+    { id: 'mh-dhoot-csn', name: 'Seth Nandlal Dhoot Hospital', city: 'MIDC Chikalthana, Aurangabad', lat: 19.8724, lng: 75.3875, type: 'Private' },
+    { id: 'mh-aurangabad-bb', name: 'Aurangabad Blood Bank & Research Institute', city: 'Osmanpura, Aurangabad', lat: 19.8733, lng: 75.3449, type: 'Charitable/Vol' },
+  ],
   'Mumbai': [
     { id: 'mh-kem', name: 'KEM Hospital & Seth G.S. Medical College', city: 'Parel, Mumbai', lat: 19.0028, lng: 72.8427, type: 'Government' },
     { id: 'mh-lilavati', name: 'Lilavati Hospital & Research Centre', city: 'Bandra West, Mumbai', lat: 19.0514, lng: 72.8291, type: 'Charitable/Vol' },

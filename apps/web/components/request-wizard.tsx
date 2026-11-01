@@ -582,7 +582,8 @@ export function RequestWizard() {
 
       setCreatedRequestId(requestId);
       setRequestCloseToken(typeof data.requestCloseToken === 'string' ? data.requestCloseToken : null);
-      setTimeout(() => goToStep('SCREEN_WAITING_ROOM'), 700);
+      const closeQuery = typeof data.requestCloseToken === 'string' ? `?closeToken=${encodeURIComponent(data.requestCloseToken)}` : '';
+      router.push(`/request/${requestId}${closeQuery}`);
     } catch (error) {
       setRequestError(error instanceof Error ? error.message : 'Unable to send emergency request.');
       goToStep('STEP_6_SEND_REQUEST');

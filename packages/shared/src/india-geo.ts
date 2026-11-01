@@ -3374,7 +3374,19 @@ export function getEraktkoshStateCode(stateName: string): string | undefined {
 export function getEraktkoshDistrictCode(stateName: string, districtName: string): string | undefined {
   const state = INDIA_STATES_DATA[stateName];
   if (!state) return undefined;
-  const lower = districtName.toLowerCase();
+  const lower = districtName.toLowerCase().replace(/district/gi, '').trim();
+
+  // Alias mapping for districts that were renamed or alternate spellings
+  const aliases: Record<string, string[]> = {
+    '515': ['chhatrapati sambhajinagar', 'aurangabad', 'sambhajinagar'],
+    '520': ['dharashiv', 'osmanabad'],
+  };
+  for (const [code, names] of Object.entries(aliases)) {
+    if (names.some((n) => lower.includes(n) || n.includes(lower))) {
+      return code;
+    }
+  }
+
   const d = state.districts.find(
     (dist) => dist.name.toLowerCase() === lower || lower.includes(dist.name.toLowerCase()) || dist.name.toLowerCase().includes(lower)
   );
