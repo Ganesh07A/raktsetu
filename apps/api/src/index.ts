@@ -5,8 +5,11 @@ import { bloodBankRoutes } from './routes/blood-banks';
 import { donorRoutes } from './routes/donors';
 import { requestRoutes } from './routes/requests';
 import { pushRoutes } from './routes/push';
+import { healthRoutes, readyRoutes } from './routes/health';
+import { logConfigProblems } from './lib/config';
 
 const app = new Hono();
+logConfigProblems();
 
 app.use('*', logger());
 app.use(
@@ -28,7 +31,8 @@ app.onError((err, c) => {
 
 app.notFound((c) => c.json({ error: 'Not Found', status: 404 }, 404));
 
-app.get('/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }));
+app.route('/health', healthRoutes);
+app.route('/ready', readyRoutes);
 
 app.route('/api/v1/blood-banks', bloodBankRoutes);
 app.route('/api/v1/donors', donorRoutes);

@@ -1,6 +1,7 @@
 import { applicationDefault, cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getMessaging, type Message } from 'firebase-admin/messaging';
 import { mockStore } from './mock-store';
+import { recordPushOutcome } from '../lib/telemetry';
 
 export interface DonationPushParams {
   tokens: string[];
@@ -50,6 +51,7 @@ export class PushNotificationService {
   async sendDonationRequest(params: DonationPushParams): Promise<DonationPushResult> {
     const tokens = [...new Set(params.tokens)].filter(Boolean);
     if (tokens.length === 0) {
+      recordPushOutcome('no_tokens');
       return { success: false, messageId: null, mode: 'disabled', invalidTokens: [] };
     }
 
@@ -72,16 +74,19 @@ export class PushNotificationService {
         recipientCount: tokens.length,
         timestamp: new Date().toISOString(),
       });
+      recordPushOutcome('sent', { mock: true });
       return { success: true, messageId, mode: 'mock', invalidTokens: [] };
     }
 
     const messaging = getMessagingClient();
     if (!messaging) {
       console.warn('[@repo/api] FCM is not configured; push notification was not sent.');
+      recordPushOutcome('disabled', { error: 'FCM is not configured' });
       return { success: false, messageId: null, mode: 'disabled', invalidTokens: [] };
     }
 
     const invalidTokens: string[] = [];
+    let firstError: string | undefined;
     let firstMessageId: string | null = null;
     let successCount = 0;
     for (let offset = 0; offset < tokens.length; offset += 500) {
@@ -131,6 +136,7 @@ export class PushNotificationService {
             firstMessageId ||= response.messageId || null;
             return;
           }
+          firstError ??= response.error?.message || response.error?.code || 'unknown FCM error';
           const code = response.error?.code;
           if (
             code === 'messaging/registration-token-not-registered' ||
@@ -139,8 +145,14 @@ export class PushNotificationService {
         });
       } catch (error) {
         console.error('[@repo/api] FCM batch send failed:', error);
+        firstError ??= error instanceof Error ? error.message : 'FCM batch send failed';
       }
     }
+
+    recordPushOutcome(successCount > 0 ? 'sent' : 'failed', {
+      error: firstError,
+      invalidTokens: invalidTokens.length,
+    });
 
     return {
       success: successCount > 0,
