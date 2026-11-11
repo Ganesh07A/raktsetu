@@ -66,7 +66,7 @@ export default function SearchResultsPage() {
     bank.stock?.some((item) =>
       item.bloodGroup === bloodGroup &&
       item.componentType === componentType &&
-      item.unitsAvailable >= unitsNeeded
+      (item.unitsAvailable ?? 0) >= unitsNeeded
     )
   );
   const hasMeasuredBankDistances = banks.some((bank) => bank.distanceKm !== null);
@@ -116,12 +116,12 @@ export default function SearchResultsPage() {
           const aHasStock = a.stock?.some((item) =>
             item.bloodGroup === bloodGroup &&
             item.componentType === componentType &&
-            item.unitsAvailable >= unitsNeeded
+            (item.unitsAvailable ?? 0) >= unitsNeeded
           ) ?? false;
           const bHasStock = b.stock?.some((item) =>
             item.bloodGroup === bloodGroup &&
             item.componentType === componentType &&
-            item.unitsAvailable >= unitsNeeded
+            (item.unitsAvailable ?? 0) >= unitsNeeded
           ) ?? false;
           if (aHasStock !== bHasStock) return aHasStock ? -1 : 1;
           if (a.distanceKm === null && b.distanceKm !== null) return 1;
@@ -303,6 +303,19 @@ export default function SearchResultsPage() {
         </div>
       )}
 
+      {/* Medical Disclaimer Banner (C-01) */}
+      <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-xs leading-relaxed text-red-900 shadow-xs flex items-start gap-2.5">
+        <Info className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+        <div>
+          <span className="font-bold">{isHi ? 'महत्वपूर्ण चिकित्सा सूचना: ' : 'Important Medical Notice: '}</span>
+          <span>
+            {isHi
+              ? 'रक्त की उपलब्धता की पुष्टि सीधे ब्लड बैंक एवं उपचार कर रहे अस्पताल से की जानी चाहिए। अंतिम संगतता और क्रॉस-मैचिंग योग्य चिकित्सा पेशेवरों द्वारा ही की जानी चाहिए।'
+              : 'Blood availability must be confirmed directly with the blood bank and the treating hospital. Final compatibility and cross-matching must be performed by qualified medical professionals.'}
+          </span>
+        </div>
+      </div>
+
       {/* STAGE 1: Institutional Results (Blood Banks with Available Stock) */}
       {!loading && banks.length > 0 && (
         <section className="space-y-4">
@@ -338,7 +351,7 @@ export default function SearchResultsPage() {
           <div className="grid grid-cols-1 gap-4">
             {banks.map((bank) => {
               const matchedStock = bank.stock?.find(
-                (s) => s.bloodGroup === bloodGroup && s.componentType === componentType && s.unitsAvailable > 0
+                (s) => s.bloodGroup === bloodGroup && s.componentType === componentType && (s.unitsAvailable ?? 0) > 0
               );
               const availableUnits = matchedStock?.unitsAvailable ?? 0;
 
@@ -360,7 +373,13 @@ export default function SearchResultsPage() {
                               className="bg-emerald-50 text-emerald-800 border-emerald-300 text-[10px] font-semibold flex items-center gap-1"
                             >
                               <ShieldCheck className="h-3 w-3 text-emerald-600" />
-                              <span>eRaktKosh Verified</span>
+                              <span>
+                              {bank.verificationStatus === 'partner_confirmed'
+                                ? (isHi ? 'साझेदार द्वारा पुष्टि' : 'Partner Confirmed')
+                                : bank.source === 'eraktkosh'
+                                ? (isHi ? 'eRaktKosh स्रोत दर्ज' : 'Reported by eRaktKosh')
+                                : (isHi ? 'निर्देशिका (कॉल कर पुष्टि करें)' : 'Directory Listing')}
+                            </span>
                             </Badge>
                           )}
                         </div>

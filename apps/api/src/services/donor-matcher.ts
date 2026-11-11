@@ -45,6 +45,7 @@ export interface DonorMatcherParams {
   radiusKm?: number;
   limit?: number;
   referenceDate?: Date;
+  excludeIneligible?: boolean;
 }
 
 export class DonorMatcherService {
@@ -201,7 +202,10 @@ export class DonorMatcherService {
         continue;
       }
 
-      // 3. Distance calculation
+      // 3. Hard radius limit of 50 km enforced server-side
+      const effectiveRadius = Math.min(50, Math.max(1, radiusKm));
+
+      // Distance calculation
       const dist = haversineDistance(
         latitude,
         longitude,
@@ -209,14 +213,19 @@ export class DonorMatcherService {
         donor.longitude
       );
 
-      // Check within radius
-      if (dist <= radiusKm) {
-        // 4. Soft eligibility assessment
+      // Check within seeker search radius AND within donor travel willingness radius (H-03)
+      if (dist <= effectiveRadius && (!donor.searchRadiusKm || dist <= donor.searchRadiusKm)) {
+        // 4. Eligibility assessment
         const assessment = this.evaluateEligibility(
           donor.gender,
           donor.lastDonationDate,
           referenceDate
         );
+
+        // If excludeIneligible is requested (e.g. for emergency notification cascades), skip ineligible donors
+        if (params.excludeIneligible && !assessment.eligible) {
+          continue;
+        }
 
         matchedList.push({
           id: donor.id,

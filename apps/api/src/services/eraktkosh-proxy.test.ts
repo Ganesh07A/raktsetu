@@ -67,8 +67,8 @@ describe('ERaktKoshProxyService', () => {
     for (let i = 0; i < res.banks.length - 1; i++) {
       const current = res.banks[i]!;
       const next = res.banks[i + 1]!;
-      const currentHasStock = current.stock.some((item) => item.unitsAvailable > 0);
-      const nextHasStock = next.stock.some((item) => item.unitsAvailable > 0);
+      const currentHasStock = current.stock.some((item) => (item.unitsAvailable ?? 0) > 0);
+      const nextHasStock = next.stock.some((item) => (item.unitsAvailable ?? 0) > 0);
 
       if (currentHasStock !== nextHasStock) {
         expect(currentHasStock).toBe(true);

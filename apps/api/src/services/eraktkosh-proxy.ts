@@ -216,8 +216,8 @@ export class ERaktKoshProxyService {
         }
       }
 
-      // If still empty (e.g. offline), fall back to seed dataset
-      if (finalBanks.length === 0) {
+      // In test mode only, fall back to seed dataset if empty. In production, never manufacture fake inventory.
+      if (process.env.NODE_ENV === 'test' && finalBanks.length === 0) {
         finalBanks = this.queryLocalSeedBanks(params);
         source = 'database';
       }
@@ -226,8 +226,8 @@ export class ERaktKoshProxyService {
     // Prioritize records with the requested stock, then sort by measured distance.
     // Unknown distances are always placed after records with real coordinates.
     finalBanks.sort((a, b) => {
-      const aHasStock = a.stock.some((item) => item.unitsAvailable > 0);
-      const bHasStock = b.stock.some((item) => item.unitsAvailable > 0);
+      const aHasStock = a.stock.some((item) => (item.unitsAvailable ?? 0) > 0);
+      const bHasStock = b.stock.some((item) => (item.unitsAvailable ?? 0) > 0);
       if (aHasStock !== bHasStock) return aHasStock ? -1 : 1;
       if (a.distanceKm === null && b.distanceKm !== null) return 1;
       if (a.distanceKm !== null && b.distanceKm === null) return -1;
@@ -321,19 +321,12 @@ export class ERaktKoshProxyService {
         const district = props.district || props.city || 'District';
         const state = props.state || this.resolveStateName(params.stateCode || '') || 'State';
         const address = [props.street, props.district, props.city].filter(Boolean).join(', ') || `${name}, ${city}`;
-        const phone = props.phone || props['contact:phone'] || '+91-240-2334411';
+        // Truthful contact info only: never fabricate a default phone number
+        const phone = props.phone || props['contact:phone'] || null;
 
-        // Generate stock for available groups
-        const allGroups: BloodGroup[] = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
-        const stock: StockItem[] = allGroups.map((bg) => {
-          const hash = (name.charCodeAt(0) + bg.charCodeAt(0)) % 15 + 3;
-          return {
-            bloodGroup: bg,
-            componentType,
-            unitsAvailable: hash,
-            lastUpdated: new Date().toISOString(),
-          };
-        });
+        // Truthful stock info: OpenData directory does not provide live inventory.
+        // Never manufacture synthetic stock counts or timestamps.
+        const stock: StockItem[] = [];
 
         banks.push({
           id: `osm-${props.osm_id || Math.random().toString(36).slice(2, 9)}`,
@@ -348,10 +341,12 @@ export class ERaktKoshProxyService {
           latitude: bankLat,
           longitude: bankLng,
           distanceKm: Number(distanceKm.toFixed(1)),
-          stock: bloodGroup ? stock.filter((s) => s.bloodGroup === bloodGroup) : stock,
-          isVerified: true,
-          source: 'partner',
-          lastStockUpdate: new Date().toISOString(),
+          stock,
+          isVerified: false,
+          source: 'manual',
+          verificationStatus: 'unverified',
+          lastStockUpdate: null,
+          isStockAvailable: false,
         });
       }
 
@@ -494,9 +489,11 @@ export class ERaktKoshProxyService {
         longitude: null,
         distanceKm,
         stock: stockItems,
-        isVerified: true,
+        isVerified: false,
         source: 'eraktkosh',
+        verificationStatus: stockItems.length > 0 ? 'source_reported' : 'unavailable',
         lastStockUpdate: updatedTimestamp,
+        isStockAvailable: stockItems.length > 0,
       });
     });
 

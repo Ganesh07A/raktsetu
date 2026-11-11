@@ -5,6 +5,7 @@ import { bloodBankRoutes } from './routes/blood-banks';
 import { donorRoutes } from './routes/donors';
 import { requestRoutes } from './routes/requests';
 import { pushRoutes } from './routes/push';
+import { authRoutes } from './routes/auth';
 import { healthRoutes, readyRoutes } from './routes/health';
 import { logConfigProblems } from './lib/config';
 
@@ -38,6 +39,7 @@ app.route('/api/v1/blood-banks', bloodBankRoutes);
 app.route('/api/v1/donors', donorRoutes);
 app.route('/api/v1/requests', requestRoutes);
 app.route('/api/v1/push', pushRoutes);
+app.route('/api/v1/auth', authRoutes);
 
 const port = Number(process.env.PORT || process.env.API_PORT || 3002);
 

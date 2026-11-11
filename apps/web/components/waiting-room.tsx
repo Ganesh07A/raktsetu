@@ -30,7 +30,7 @@ export interface WaitingRoomProps {
   };
 }
 
-export function WaitingRoom({ requestId, requestCloseToken, initialData }: WaitingRoomProps) {
+export function WaitingRoom({ requestId, requestCloseToken, requestViewToken, initialData }: WaitingRoomProps & { requestViewToken?: string | null }) {
   const locale = useLocale();
   const isHi = locale === 'hi';
 
@@ -48,7 +48,15 @@ export function WaitingRoom({ requestId, requestCloseToken, initialData }: Waiti
 
     const poll = async () => {
       try {
+        const token =
+          requestViewToken ||
+          (typeof window !== 'undefined'
+            ? sessionStorage.getItem(`raktkhoj_view_token_${requestId}`)
+            : null);
+        const reqHeaders: Record<string, string> = {};
+        if (token) reqHeaders['Authorization'] = `Bearer ${token}`;
         const response = await fetch(`${API_BASE}/api/v1/requests/${encodeURIComponent(requestId)}`, {
+          headers: reqHeaders,
           cache: 'no-store',
         });
         const data = await response.json().catch(() => ({}));

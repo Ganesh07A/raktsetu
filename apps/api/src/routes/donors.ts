@@ -2,13 +2,21 @@ import { Hono } from 'hono';
 import {
   BLOOD_GROUPS,
   phoneSchema,
+  donorRegistrationSchema,
+  evaluateDonorMedicalEligibility,
   type BloodGroup,
   type DonorProfile,
 } from '@repo/shared';
 import { db, users, donorProfiles, donorNotifications, bloodRequests, eq, or, and, desc } from '@repo/db';
 import { mockStore } from '../services/mock-store';
 import { donorMatcher } from '../services/donor-matcher';
-import { createDonorSessionToken, verifyDonorSessionToken, createDonorResponseToken } from '../services/donor-session';
+import {
+  createDonorSessionToken,
+  verifyDonorSessionToken,
+  createDonorResponseToken,
+  consumeOtpVerificationTicket,
+} from '../services/donor-session';
+import { rateLimiter } from '../middleware/rate-limiter';
 
 export const donorRoutes = new Hono();
 
@@ -22,81 +30,110 @@ const isLiveDb = (): boolean => {
 };
 
 // POST /api/v1/donors/register
-donorRoutes.post('/register', async (c) => {
-  let body: any;
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: 'Invalid JSON payload' }, 400);
-  }
+donorRoutes.post(
+  '/register',
+  rateLimiter({ windowMs: 15 * 60 * 1000, limit: 15, message: 'Too many registration requests from this IP.' }),
+  async (c) => {
+    let body: any;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON payload' }, 400);
+    }
 
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    return c.json({ error: 'Expected JSON object in request body' }, 400);
-  }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'Expected JSON object in request body' }, 400);
+    }
 
-  if ('giant' in body) {
-    return c.json({ success: true, message: 'Payload processed' }, 200);
-  }
+    if ('giant' in body) {
+      return c.json({ success: true, message: 'Payload processed' }, 200);
+    }
 
-  // Validate phone number
-  const phoneResult = phoneSchema.safeParse(body.phone);
-  if (!phoneResult.success) {
-    return c.json(
-      { error: 'Invalid Indian mobile number (+91 or 10 digits starting with 6-9)' },
-      400
-    );
-  }
-  const normalizedPhone = phoneResult.data;
+    // Validate registration body with shared schema
+    const parseResult = donorRegistrationSchema.safeParse(body);
+    if (!parseResult.success) {
+      return c.json(
+        {
+          error: parseResult.error.issues[0]?.message || 'Invalid donor registration payload',
+          details: parseResult.error.issues,
+        },
+        400
+      );
+    }
 
-  // Validate blood group
-  if (!body.bloodGroup || !BLOOD_GROUPS.includes(body.bloodGroup)) {
-    return c.json({ error: `Invalid blood group: ${body.bloodGroup}` }, 400);
-  }
+    const validData = parseResult.data;
+    const normalizedPhone = validData.phone;
 
-  // Validate coordinates
-  if (
-    typeof body.latitude !== 'number' ||
-    typeof body.longitude !== 'number' ||
-    isNaN(body.latitude) ||
-    isNaN(body.longitude) ||
-    body.latitude < -90 ||
-    body.latitude > 90 ||
-    body.longitude < -180 ||
-    body.longitude > 180
-  ) {
-    return c.json({ error: 'Valid latitude and longitude required' }, 400);
-  }
+    // Server-side authoritative medical eligibility evaluation (C-05)
+    const eligibility = evaluateDonorMedicalEligibility({
+      dateOfBirth: validData.dateOfBirth,
+      gender: validData.gender,
+      weightKg: validData.weightKg,
+      lastDonationDate: validData.lastDonationDate,
+    });
 
-  const rawDigits = normalizedPhone.replace(/\D/g, '');
-  const tenDigits = rawDigits.slice(-10);
+    if (!eligibility.isEligible) {
+      return c.json(
+        {
+          error: eligibility.failureReasons[0] || 'Donor is medically ineligible for donation',
+          reasons: eligibility.failureReasons,
+        },
+        400
+      );
+    }
 
-  const donorId = `donor-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-  const userId = `user-${Date.now()}`;
-  const now = new Date().toISOString();
+    // Server-side OTP verification ticket enforcement (C-04)
+    const verificationTicket =
+      validData.verificationTicket ||
+      body.verificationTicket ||
+      c.req.header('x-verification-ticket');
 
-  const newDonor: DonorProfile = {
-    id: donorId,
-    userId,
-    bloodGroup: body.bloodGroup as BloodGroup,
-    latitude: body.latitude,
-    longitude: body.longitude,
-    state: body.state || 'Delhi',
-    district: body.district || 'South Delhi',
-    city: body.city || null,
-    dateOfBirth: body.dateOfBirth || null,
-    gender: body.gender || 'other',
-    weightKg: body.weightKg || null,
-    lastDonationDate: body.lastDonationDate || null,
-    isAvailable: body.isAvailable ?? true,
-    searchRadiusKm: body.searchRadiusKm || 10,
-    createdAt: now,
-    updatedAt: now,
-  };
+    if (verificationTicket) {
+      const ticketResult = consumeOtpVerificationTicket(
+        verificationTicket,
+        'donor_registration',
+        normalizedPhone
+      );
+      if (!ticketResult.success) {
+        return c.json({ error: ticketResult.error }, 401);
+      }
+    } else if (process.env.NODE_ENV === 'production') {
+      return c.json(
+        { error: 'A valid single-use phone verification ticket is required for registration' },
+        401
+      );
+    }
 
-  // Attach virtual name, phone, preferredLanguage for mock store
-  (newDonor as any).name = body.name || 'Anonymous Donor';
-  (newDonor as any).phone = normalizedPhone;
-  (newDonor as any).preferredLanguage = body.preferredLanguage || 'en';
+    const rawDigits = normalizedPhone.replace(/\D/g, '');
+    const tenDigits = rawDigits.slice(-10);
+
+    const donorId = `donor-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const userId = `user-${Date.now()}`;
+    const now = new Date().toISOString();
+
+    const newDonor: DonorProfile = {
+      id: donorId,
+      userId,
+      bloodGroup: validData.bloodGroup as BloodGroup,
+      latitude: validData.latitude,
+      longitude: validData.longitude,
+      state: validData.state || 'Delhi',
+      district: validData.district || 'South Delhi',
+      city: validData.city || null,
+      dateOfBirth: validData.dateOfBirth || null,
+      gender: validData.gender || 'other',
+      weightKg: validData.weightKg || null,
+      lastDonationDate: validData.lastDonationDate || null,
+      isAvailable: validData.isAvailable ?? true,
+      searchRadiusKm: Math.min(50, Math.max(1, validData.searchRadiusKm || 10)),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    // Attach virtual name, phone, preferredLanguage for mock store
+    (newDonor as any).name = validData.name || 'Anonymous Donor';
+    (newDonor as any).phone = normalizedPhone;
+    (newDonor as any).preferredLanguage = validData.preferredLanguage || 'en';
 
   // 1. Live DB mode: perform duplicate phone check & persistence against PostgreSQL only
   if (isLiveDb()) {
@@ -190,61 +227,97 @@ donorRoutes.post('/register', async (c) => {
 });
 
 // GET /api/v1/donors/compatible
-donorRoutes.get('/compatible', async (c) => {
-  const rawBloodGroup = c.req.query('bloodGroup');
-  const bloodGroup = (
-    rawBloodGroup
-      ? rawBloodGroup.replace(/\s+$/, '+').trim()
-      : undefined
-  ) as BloodGroup | undefined;
-  const latStr = c.req.query('lat');
-  const lngStr = c.req.query('lng');
-  const radiusKmStr = c.req.query('radiusKm');
+donorRoutes.get(
+  '/compatible',
+  rateLimiter({ windowMs: 60 * 1000, limit: 60, message: 'Too many discovery queries' }),
+  async (c) => {
+    const rawBloodGroup = c.req.query('bloodGroup');
+    const bloodGroup = (
+      rawBloodGroup
+        ? rawBloodGroup.replace(/\s+$/, '+').trim()
+        : undefined
+    ) as BloodGroup | undefined;
+    const latStr = c.req.query('lat');
+    const lngStr = c.req.query('lng');
+    const radiusKmStr = c.req.query('radiusKm');
 
-  if (!bloodGroup || !BLOOD_GROUPS.includes(bloodGroup)) {
-    return c.json({ error: 'Valid recipient bloodGroup is required' }, 400);
+    if (!bloodGroup || !BLOOD_GROUPS.includes(bloodGroup)) {
+      return c.json({ error: 'Valid recipient bloodGroup is required' }, 400);
+    }
+
+    const lat = latStr ? parseFloat(latStr) : 28.5672;
+    const lng = lngStr ? parseFloat(lngStr) : 77.21;
+    const radiusKm = radiusKmStr ? parseFloat(radiusKmStr) : 10;
+
+    // Hard limit of 50 km server-side (C-03)
+    if (radiusKm > 50) {
+      return c.json({ error: 'Search radius cannot exceed 50 km' }, 400);
+    }
+
+    const donors = await donorMatcher.findCompatibleDonors({
+      recipientBloodGroup: bloodGroup,
+      latitude: lat,
+      longitude: lng,
+      radiusKm: Math.min(50, Math.max(1, radiusKm)),
+    });
+
+    // PII Protection: never serialize internal donor records directly (C-03)
+    const sanitized = donors.map((d) => ({
+      id: d.id,
+      bloodGroup: d.bloodGroup,
+      distanceKm: Math.round(d.distanceKm * 10) / 10,
+      isAvailable: d.isAvailable,
+      isEligible: d.isEligible,
+    }));
+
+    return c.json({
+      donors: sanitized,
+      count: sanitized.length,
+    });
   }
-
-  const lat = latStr ? parseFloat(latStr) : 28.5672;
-  const lng = lngStr ? parseFloat(lngStr) : 77.21;
-  const radiusKm = radiusKmStr ? parseFloat(radiusKmStr) : 10;
-
-  const donors = await donorMatcher.findCompatibleDonors({
-    recipientBloodGroup: bloodGroup,
-    latitude: lat,
-    longitude: lng,
-    radiusKm,
-  });
-
-  return c.json({
-    donors,
-    count: donors.length,
-  });
-});
+);
 
 // POST /api/v1/donors/match
-donorRoutes.post('/match', async (c) => {
-  const body = await c.req.json();
-  const recipientBloodGroup = body.recipientBloodGroup as BloodGroup;
+donorRoutes.post(
+  '/match',
+  rateLimiter({ windowMs: 60 * 1000, limit: 60, message: 'Too many discovery queries' }),
+  async (c) => {
+    const body = await c.req.json();
+    const recipientBloodGroup = body.recipientBloodGroup as BloodGroup;
 
-  if (!recipientBloodGroup || !BLOOD_GROUPS.includes(recipientBloodGroup)) {
-    return c.json({ error: 'Valid recipient bloodGroup is required' }, 400);
+    if (!recipientBloodGroup || !BLOOD_GROUPS.includes(recipientBloodGroup)) {
+      return c.json({ error: 'Valid recipient bloodGroup is required' }, 400);
+    }
+
+    const radiusKm = body.radiusKm ? Number(body.radiusKm) : 10;
+    if (radiusKm > 50) {
+      return c.json({ error: 'Search radius cannot exceed 50 km' }, 400);
+    }
+
+    const donors = await donorMatcher.findCompatibleDonors({
+      recipientBloodGroup,
+      latitude: body.latitude,
+      longitude: body.longitude,
+      radiusKm: Math.min(50, Math.max(1, radiusKm)),
+      limit: body.limit,
+    });
+
+    // PII Protection: strip names, phones, internal IDs, and exact coordinates
+    const sanitized = donors.map((d) => ({
+      id: d.id,
+      bloodGroup: d.bloodGroup,
+      distanceKm: Math.round(d.distanceKm * 10) / 10,
+      isAvailable: d.isAvailable,
+      isEligible: d.isEligible,
+    }));
+
+    return c.json({
+      success: true,
+      matchedCount: sanitized.length,
+      donors: sanitized,
+    });
   }
-
-  const donors = await donorMatcher.findCompatibleDonors({
-    recipientBloodGroup,
-    latitude: body.latitude,
-    longitude: body.longitude,
-    radiusKm: body.radiusKm || 10,
-    limit: body.limit,
-  });
-
-  return c.json({
-    success: true,
-    matchedCount: donors.length,
-    donors,
-  });
-});
+);
 
 // GET /api/v1/donors/profile/:id
 donorRoutes.get('/profile/:id', async (c) => {

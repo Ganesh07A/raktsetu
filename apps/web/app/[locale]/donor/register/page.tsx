@@ -62,6 +62,8 @@ export default function DonorRegistrationPage() {
   const [otpCode, setOtpCode] = React.useState<string>('');
   const [otpVerified, setOtpVerified] = React.useState<boolean>(false);
   const [otpError, setOtpError] = React.useState<string | null>(null);
+  const [otpLoading, setOtpLoading] = React.useState<boolean>(false);
+  const [verificationTicket, setVerificationTicket] = React.useState<string | null>(null);
 
   // Personal Info
   const [name, setName] = React.useState<string>('');
@@ -92,8 +94,8 @@ export default function DonorRegistrationPage() {
 
   const steps = isHi ? STEPS_HI : STEPS_EN;
 
-  // Step 1: Send OTP
-  const handleSendOtp = () => {
+  // Step 1: Send genuine server-side OTP (C-04)
+  const handleSendOtp = async () => {
     if (!isValidIndianMobile(phone)) {
       setOtpError(
         isHi
@@ -103,17 +105,64 @@ export default function DonorRegistrationPage() {
       return;
     }
     setOtpError(null);
-    setOtpSent(true);
-    setOtpCode('123456'); // Pre-fill mock OTP for smooth verification
+    setOtpLoading(true);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/otp/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: `+91${phone.replace(/\D/g, '').slice(-10)}`,
+          purpose: 'donor_registration',
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to dispatch verification code');
+      }
+
+      setOtpSent(true);
+      setOtpCode(''); // Clean code input, never pre-fill mock code in production
+    } catch (err: any) {
+      setOtpError(err.message || 'Error sending OTP');
+    } finally {
+      setOtpLoading(false);
+    }
   };
 
-  const handleVerifyOtp = () => {
-    if (otpCode === '123456' || otpCode.length === 6) {
+  const handleVerifyOtp = async () => {
+    if (!otpCode || otpCode.trim().length !== 6) {
+      setOtpError(isHi ? 'कृपया 6 अंकों का OTP दर्ज करें' : 'Please enter the 6-digit OTP code');
+      return;
+    }
+    setOtpError(null);
+    setOtpLoading(true);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/otp/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: `+91${phone.replace(/\D/g, '').slice(-10)}`,
+          otp: otpCode.trim(),
+          purpose: 'donor_registration',
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || (isHi ? 'अमान्य OTP कोड' : 'Invalid OTP code'));
+      }
+
+      setVerificationTicket(data.verificationTicket);
       setOtpVerified(true);
       setOtpError(null);
       setCurrentStep(2);
-    } else {
-      setOtpError(isHi ? 'अमान्य OTP कोड' : 'Invalid OTP code');
+    } catch (err: any) {
+      setOtpError(err.message || (isHi ? 'सत्यापन विफल' : 'Verification failed'));
+    } finally {
+      setOtpLoading(false);
     }
   };
 
@@ -158,6 +207,7 @@ export default function DonorRegistrationPage() {
       isAvailable,
       searchRadiusKm,
       preferredLanguage: locale as 'en' | 'hi',
+      verificationTicket: verificationTicket || undefined,
     };
 
     try {
@@ -330,9 +380,14 @@ export default function DonorRegistrationPage() {
                 <Button
                   type="button"
                   onClick={handleSendOtp}
+                  disabled={otpLoading}
                   className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-11"
                 >
-                  <span>{isHi ? 'OTP कोड प्राप्त करें' : 'Get Verification Code'}</span>
+                  <span>
+                    {otpLoading
+                      ? (isHi ? 'भेज रहा है...' : 'Sending Code...')
+                      : (isHi ? 'OTP कोड प्राप्त करें' : 'Get Verification Code')}
+                  </span>
                 </Button>
               ) : (
                 <div className="space-y-4 pt-2">
@@ -341,14 +396,14 @@ export default function DonorRegistrationPage() {
                       <label className="text-xs font-bold text-slate-700">
                         {isHi ? '6-अंकीय OTP कोड' : '6-Digit OTP Code'}
                       </label>
-                      <span className="text-[11px] text-emerald-700 font-semibold">
-                        {isHi ? 'टेस्ट कोड: 123456' : 'Test Code: 123456'}
+                      <span className="text-[11px] text-slate-500">
+                        {isHi ? 'एसएमएस द्वारा भेजा गया कोड' : 'Code sent via SMS'}
                       </span>
                     </div>
                     <Input
                       type="text"
                       maxLength={6}
-                      placeholder="123456"
+                      placeholder="••••••"
                       value={otpCode}
                       onChange={(e) => setOtpCode(e.target.value)}
                       className="text-center font-mono tracking-widest text-lg h-12"
@@ -360,6 +415,7 @@ export default function DonorRegistrationPage() {
                       type="button"
                       variant="outline"
                       onClick={() => setOtpSent(false)}
+                      disabled={otpLoading}
                       className="w-1/3"
                     >
                       {isHi ? 'नंबर बदलें' : 'Change Number'}
@@ -367,10 +423,15 @@ export default function DonorRegistrationPage() {
                     <Button
                       type="button"
                       onClick={handleVerifyOtp}
+                      disabled={otpLoading}
                       className="w-2/3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
                     >
-                      <span>{isHi ? 'सत्यापित करें एवं आगे बढ़ें' : 'Verify & Continue'}</span>
-                      <ArrowRight className="h-4 w-4 ml-1" />
+                      <span>
+                        {otpLoading
+                          ? (isHi ? 'सत्यापित हो रहा है...' : 'Verifying...')
+                          : (isHi ? 'सत्यापित करें एवं आगे बढ़ें' : 'Verify & Continue')}
+                      </span>
+                      <ArrowRight className="h-4 w-4 ml-1 inline" />
                     </Button>
                   </div>
                 </div>

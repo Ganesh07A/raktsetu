@@ -1,11 +1,25 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
 
 type SignedPayload = {
-  purpose: 'donor-session' | 'donor-response' | 'request-close';
+  purpose: 'donor-session' | 'donor-response' | 'request-close' | 'request-view' | 'otp-ticket';
   donorId?: string;
   requestId?: string;
+  phone?: string;
+  ticketPurpose?: string;
+  nonce?: string;
   expiresAt: number;
 };
+
+// Set of consumed single-use ticket nonces to prevent ticket replay attacks
+const consumedTicketNonces = new Set<string>();
+
+export function getConsumedTicketsCount(): number {
+  return consumedTicketNonces.size;
+}
+
+export function resetConsumedTickets(): void {
+  consumedTicketNonces.clear();
+}
 
 function signingSecret(): string {
   const secret = process.env.DONOR_SESSION_SECRET;
@@ -39,8 +53,9 @@ function verify(token: string, purpose: SignedPayload['purpose']): SignedPayload
     ) return null;
     if ((purpose === 'donor-session' || purpose === 'donor-response') &&
       (typeof payload.donorId !== 'string' || !payload.donorId)) return null;
-    if ((purpose === 'donor-response' || purpose === 'request-close') &&
+    if ((purpose === 'donor-response' || purpose === 'request-close' || purpose === 'request-view') &&
       (typeof payload.requestId !== 'string' || !payload.requestId)) return null;
+    if (purpose === 'otp-ticket' && (!payload.phone || !payload.nonce)) return null;
     return payload;
   } catch {
     return null;
@@ -76,7 +91,6 @@ export function verifyDonorResponseToken(token: string): { requestId: string; do
     : null;
 }
 
-
 /** Signed capability held by the seeker who created a request; permits closing only that request. */
 export function createRequestCloseToken(requestId: string): string {
   return sign({
@@ -90,3 +104,58 @@ export function verifyRequestCloseToken(token: string): { requestId: string } | 
   const payload = verify(token, 'request-close');
   return payload?.requestId ? { requestId: payload.requestId } : null;
 }
+
+/** Signed capability held by the seeker who created a request; permits viewing request details & waiting room status. */
+export function createRequestViewToken(requestId: string): string {
+  return sign({
+    purpose: 'request-view',
+    requestId,
+    expiresAt: Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+  });
+}
+
+export function verifyRequestViewToken(token: string): { requestId: string } | null {
+  const payload = verify(token, 'request-view');
+  return payload?.requestId ? { requestId: payload.requestId } : null;
+}
+
+/** Generate a single-use verification ticket for a verified phone number */
+export function createOtpVerificationTicket(phone: string, ticketPurpose: string): string {
+  return sign({
+    purpose: 'otp-ticket',
+    phone,
+    ticketPurpose,
+    nonce: randomUUID(),
+    expiresAt: Math.floor(Date.now() / 1000) + 15 * 60, // 15 minutes validity
+  });
+}
+
+/** Atomically verify and consume single-use verification ticket to prevent replay */
+export function consumeOtpVerificationTicket(
+  ticket: string,
+  expectedPurpose: string,
+  expectedPhone: string
+): { success: boolean; error?: string } {
+  const payload = verify(ticket, 'otp-ticket');
+  if (!payload || !payload.nonce || !payload.phone) {
+    return { success: false, error: 'Invalid or expired phone verification ticket' };
+  }
+
+  if (payload.ticketPurpose && payload.ticketPurpose !== expectedPurpose) {
+    return { success: false, error: 'Verification ticket was issued for a different operation' };
+  }
+
+  const normalizedExpected = expectedPhone.replace(/\D/g, '').slice(-10);
+  const normalizedTicketPhone = payload.phone.replace(/\D/g, '').slice(-10);
+  if (normalizedExpected !== normalizedTicketPhone) {
+    return { success: false, error: 'Verification ticket phone does not match requested phone' };
+  }
+
+  if (consumedTicketNonces.has(payload.nonce)) {
+    return { success: false, error: 'Verification ticket has already been used' };
+  }
+
+  consumedTicketNonces.add(payload.nonce);
+  return { success: true };
+}
+
