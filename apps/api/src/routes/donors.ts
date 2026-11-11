@@ -1,10 +1,12 @@
 import { Hono } from 'hono';
 import {
   BLOOD_GROUPS,
+  COMPONENT_TYPES,
   phoneSchema,
   donorRegistrationSchema,
   evaluateDonorMedicalEligibility,
   type BloodGroup,
+  type ComponentType,
   type DonorProfile,
 } from '@repo/shared';
 import { db, users, donorProfiles, donorNotifications, bloodRequests, eq, or, and, desc } from '@repo/db';
@@ -240,6 +242,12 @@ donorRoutes.get(
     const latStr = c.req.query('lat');
     const lngStr = c.req.query('lng');
     const radiusKmStr = c.req.query('radiusKm');
+    const rawComponent = c.req.query('componentType');
+    const componentType = (
+      rawComponent && COMPONENT_TYPES.includes(rawComponent as ComponentType)
+        ? (rawComponent as ComponentType)
+        : undefined
+    );
 
     if (!bloodGroup || !BLOOD_GROUPS.includes(bloodGroup)) {
       return c.json({ error: 'Valid recipient bloodGroup is required' }, 400);
@@ -256,6 +264,7 @@ donorRoutes.get(
 
     const donors = await donorMatcher.findCompatibleDonors({
       recipientBloodGroup: bloodGroup,
+      componentType,
       latitude: lat,
       longitude: lng,
       radiusKm: Math.min(50, Math.max(1, radiusKm)),
@@ -294,8 +303,15 @@ donorRoutes.post(
       return c.json({ error: 'Search radius cannot exceed 50 km' }, 400);
     }
 
+    const componentType = (
+      body.componentType && COMPONENT_TYPES.includes(body.componentType as ComponentType)
+        ? (body.componentType as ComponentType)
+        : undefined
+    );
+
     const donors = await donorMatcher.findCompatibleDonors({
       recipientBloodGroup,
+      componentType,
       latitude: body.latitude,
       longitude: body.longitude,
       radiusKm: Math.min(50, Math.max(1, radiusKm)),

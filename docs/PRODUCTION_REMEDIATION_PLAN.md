@@ -185,3 +185,180 @@ Current Branch: `fix/checkpoint-1-security-containment`
   - Rate limiting tests on OTP and request endpoints.
 - **Status**: COMPLETED (Verified via automated tests)
 
+---
+
+## 3. Checkpoint 2 Remediation Matrix: Business Logic & Reliability
+
+### H-01: Correct Blood-Group Deep Links & Selection Integrity
+- **Finding ID**: H-01
+- **Severity**: High (P1)
+- **Affected Files**:
+  - `apps/web/app/[locale]/request/page.tsx`
+  - `apps/web/components/request-wizard.tsx`
+  - `tests/checkpoint2-business-reliability.test.ts`
+- **Root Cause**:
+  - `RequestWizard` hardcoded state initialization to `'AB+'` and ignored `useSearchParams()`.
+  - When deep-linking with `/request?bloodGroup=...`, the parameter was ignored.
+  - If invalid or missing, it silently selected `'AB+'`.
+  - Language toggle discarded search query parameters.
+- **Proposed Solution**:
+  - Read `searchParams.get('bloodGroup')`, normalizing whitespace and URL-encoded plus signs (`%2B`, `+`, trailing spaces).
+  - Validate across all 8 ABO/Rh blood groups (`A+`, `A-`, `B+`, `B-`, `AB+`, `AB-`, `O+`, `O-`).
+  - Initialize to `null` if absent or invalid; NEVER default silently to `AB+`.
+  - Disable Continue button in Step 1 until explicit user selection.
+  - Preserve selection across navigation, step history, and language toggle.
+  - Wrap page in `<React.Suspense>` to ensure Next.js SSR hydration safety.
+- **Acceptance Criteria**:
+  - Navigating to `/request?bloodGroup=B%2B` selects B+.
+  - Invalid blood groups do not select any blood group.
+  - Switching language retains selected blood group in URL.
+- **Test Coverage**:
+  - 8-group normalization and invalid-value exclusion tests in `checkpoint2-business-reliability.test.ts`.
+- **Status**: COMPLETED (Verified via automated tests)
+
+---
+
+### H-02: Persist Matched Blood-Bank References
+- **Finding ID**: H-02
+- **Severity**: High (P1)
+- **Affected Files**:
+  - `packages/db/src/schema/blood-requests.ts`
+  - `packages/shared/src/types.ts`
+  - `apps/api/src/routes/requests.ts`
+  - `apps/api/src/services/request-service.ts`
+  - `apps/web/components/waiting-room.tsx`
+  - `tests/checkpoint2-business-reliability.test.ts`
+- **Root Cause**:
+  - When institutional stock was found, request status transitioned to `bank_found`, but matched blood bank identifier, name, phone, address, and distance were discarded and never persisted to the request record.
+  - Waiting room UI did not surface actionable blood bank contacts to the seeker.
+- **Proposed Solution**:
+  - Extended `blood_requests` schema and `BloodRequest` interface with:
+    `matched_bank_id`, `matched_bank_name`, `matched_bank_phone`, `matched_bank_address`, `matched_bank_distance_km`, `matched_bank_provenance`, `matched_bank_verification_status`.
+  - Stored verified matched bank details during request creation in both Postgres DB and mock store.
+  - Returned matched bank details in `GET /api/v1/requests/:id` to authorized seekers.
+  - Rendered actionable blood bank card in waiting room with direct call button (`tel:`) and location details.
+- **Acceptance Criteria**:
+  - Request marked `bank_found` contains full matched bank reference.
+  - Waiting room presents actionable blood bank contact and address.
+- **Test Coverage**:
+  - Verified in `checkpoint2-business-reliability.test.ts` via request creation and capability retrieval.
+- **Status**: COMPLETED (Verified via automated tests)
+
+---
+
+### H-03: Respect Donor Travel Radius
+- **Finding ID**: H-03
+- **Severity**: High (P1)
+- **Affected Files**:
+  - `apps/api/src/services/donor-matcher.ts`
+  - `tests/checkpoint2-business-reliability.test.ts`
+- **Root Cause**:
+  - Donor matching previously applied donor travel willingness radius inconsistently or allowed seeker radius to override donor willingness.
+- **Proposed Solution**:
+  - Enforced strict bidirectional filtering:
+    `dist <= effectiveSeekerRadius && dist <= donorMaxRadius`.
+  - Ensured donor's configured willingness radius (e.g. 5 km) strictly prevents matching when the donor is farther away (e.g. 8 km), regardless of seeker search radius (e.g. 10 km or 50 km).
+- **Acceptance Criteria**:
+  - Donors beyond their own travel willingness radius are never matched.
+  - Donors beyond seeker radius are never matched.
+- **Test Coverage**:
+  - Boundary distance tests in `checkpoint2-business-reliability.test.ts`.
+- **Status**: COMPLETED (Verified via automated tests)
+
+---
+
+### H-04: Correct Blood-Component Semantics
+- **Finding ID**: H-04
+- **Severity**: High (P1)
+- **Affected Files**:
+  - `packages/shared/src/blood-compatibility.ts`
+  - `packages/shared/src/types.ts`
+  - `apps/api/src/services/donor-matcher.ts`
+  - `apps/api/src/routes/donors.ts`
+  - `apps/api/src/routes/requests.ts`
+  - `tests/checkpoint2-business-reliability.test.ts`
+- **Root Cause**:
+  - System applied Red Blood Cell (RBC) compatibility rules to all component types.
+  - RBC rules are clinically hazardous for Fresh Frozen Plasma (FFP), where donor antibodies are transfused (e.g. AB is universal plasma donor, O is universal plasma recipient).
+  - Whole blood requires identical ABO groups to avoid recipient red cell hemolysis from donor plasma antibodies.
+- **Proposed Solution**:
+  - Implemented component-specific compatibility matrices:
+    - `RBC_COMPATIBILITY` (PRBC): Universal donor O-, universal recipient AB+.
+    - `WHOLE_BLOOD_COMPATIBILITY`: Identical ABO group with compatible Rh.
+    - `PLASMA_COMPATIBILITY` (FFP): Universal donor AB, universal recipient O.
+    - `PLATELET_COMPATIBILITY`: ABO identical and plasma-compatible.
+  - Enhanced `getCompatibleDonorGroups(recipientGroup, componentType)` and `isDonorCompatible(donorGroup, recipientGroup, componentType)`.
+  - Integrated `componentType` into `donorMatcher.findCompatibleDonors` and routes.
+- **Acceptance Criteria**:
+  - FFP compatibility follows plasma rules (AB gives to all; O receives all).
+  - Whole blood never matches mismatched ABO groups.
+- **Test Coverage**:
+  - Comprehensive clinical matrix tests in `checkpoint2-business-reliability.test.ts`.
+- **Status**: COMPLETED (Verified via automated tests)
+
+---
+
+### H-07: Correct Unknown Request Handling & Terminal State Guidance
+- **Finding ID**: H-07
+- **Severity**: High (P1)
+- **Affected Files**:
+  - `apps/web/components/waiting-room.tsx`
+  - `apps/api/src/routes/requests.ts`
+  - `tests/checkpoint2-business-reliability.test.ts`
+- **Root Cause**:
+  - Unknown request IDs caused generic errors without stopping infinite polling loops.
+  - Cancelled and expired requests were not distinguished.
+  - No emergency guidance or navigation back to safety was offered.
+- **Proposed Solution**:
+  - In `WaitingRoom`:
+    - On HTTP 404, immediately clearInterval and cancel active polling.
+    - Render dedicated "Emergency Request Not Found" state.
+    - Prominently display verified national emergency helplines:
+      - 108 (Ambulance & Emergency Medical)
+      - 104 (National Blood Bank & Health Helpline)
+      - 1910 (NACO Blood Transfusion Helpline)
+      - 112 (National Unified Emergency)
+    - Provide single-click "Create New Emergency Request" button.
+    - Distinctly handle `cancelled` vs `expired` statuses with specific badges and guidance.
+- **Acceptance Criteria**:
+  - 404 stops polling immediately.
+  - Emergency helplines and retry actions rendered clearly.
+- **Test Coverage**:
+  - 404 response test in `checkpoint2-business-reliability.test.ts`.
+- **Status**: COMPLETED (Verified via automated tests)
+
+---
+
+### Section 7: Notification Outbox Architecture
+- **Finding ID**: Architecture & Reliability Requirement
+- **Severity**: High (P1)
+- **Affected Files**:
+  - `apps/api/src/services/notification-outbox.ts` [NEW]
+  - `apps/api/src/routes/requests.ts`
+  - `tests/checkpoint2-business-reliability.test.ts`
+- **Implementation**:
+  - Built `NotificationOutboxService` with durable `pending` status recording.
+  - Decoupled push notification delivery from synchronous HTTP request flow.
+  - Implemented automatic retry loop with exponential backoff (up to 3 attempts).
+  - Automatic pruning of dead/unregistered FCM push tokens (`messaging/registration-token-not-registered`).
+- **Status**: COMPLETED (Verified via automated tests)
+
+---
+
+### Section 8: Request Lifecycle State Machine & Terminal Concurrency
+- **Finding ID**: Architecture & Concurrency Requirement
+- **Severity**: High (P1)
+- **Affected Files**:
+  - `docs/REQUEST_LIFECYCLE.md` [NEW]
+  - `apps/api/src/services/request-service.ts`
+  - `apps/api/src/routes/requests.ts`
+  - `tests/checkpoint2-business-reliability.test.ts`
+- **Implementation**:
+  - Published comprehensive technical specification and mermaid diagram in `docs/REQUEST_LIFECYCLE.md`.
+  - Implemented `updateRequestStatus` in `request-service.ts` with strict `ALLOWED_TRANSITIONS`:
+    `searching` -> `bank_found` | `donors_notified` -> `fulfilled` | `cancelled` | `expired`.
+  - Guaranteed terminal state immutability: Requests in `cancelled` or `expired` states reject all further state transitions (returns HTTP 409 Conflict).
+  - Enforced conditional atomic SQL updates and row-level locking (`FOR UPDATE`) in PostgreSQL transactions.
+- **Status**: COMPLETED (Verified via automated tests)
+
+

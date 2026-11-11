@@ -118,3 +118,4 @@ authRoutes.post('/otp/verify', otpVerifyRateLimit, async (c) => {
     message: 'Mobile number verified successfully',
   });
 });
+

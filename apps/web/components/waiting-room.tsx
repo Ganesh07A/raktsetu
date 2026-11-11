@@ -5,6 +5,7 @@ import { useLocale } from 'next-intl';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@repo/ui/card';
 import { Badge } from '@repo/ui/badge';
 import { Button } from '@repo/ui/button';
+import Link from 'next/link';
 import {
   Clock,
   CheckCircle2,
@@ -13,6 +14,8 @@ import {
   HeartHandshake,
   XCircle,
   Loader2,
+  Building2,
+  PlusCircle,
 } from 'lucide-react';
 import type { BloodRequest, AcceptedDonorContact, DonorNotificationSummary } from '@repo/shared';
 
@@ -41,6 +44,7 @@ export function WaitingRoom({ requestId, requestCloseToken, requestViewToken, in
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [closing, setClosing] = React.useState(false);
   const [closeError, setCloseError] = React.useState<string | null>(null);
+  const [isNotFound, setIsNotFound] = React.useState(false);
 
   React.useEffect(() => {
     let active = true;
@@ -60,7 +64,17 @@ export function WaitingRoom({ requestId, requestCloseToken, requestViewToken, in
           cache: 'no-store',
         });
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || 'Unable to load request status.');
+        if (!response.ok) {
+          if (response.status === 404) {
+            if (interval) clearInterval(interval);
+            if (!active) return;
+            setIsNotFound(true);
+            setLoading(false);
+            setLoadError(data.error || (isHi ? 'यह आपातकालीन अनुरोध नहीं मिला।' : 'Emergency blood request not found.'));
+            return;
+          }
+          throw new Error(data.error || 'Unable to load request status.');
+        }
 
         if (!active) return;
         setRequest(data.request || null);
@@ -122,7 +136,9 @@ export function WaitingRoom({ requestId, requestCloseToken, requestViewToken, in
 
   const isFulfilled = request?.status === 'fulfilled' || acceptedDonors.length > 0;
   const hasBankStock = request?.status === 'bank_found';
-  const isClosed = request?.status === 'cancelled' || request?.status === 'expired';
+  const isCancelled = request?.status === 'cancelled';
+  const isExpired = request?.status === 'expired';
+  const isClosed = isCancelled || isExpired;
   const pushSent = notifications.some((item) =>
     ['sent', 'delivered', 'read', 'accepted'].includes(item.status)
   );
@@ -161,9 +177,82 @@ export function WaitingRoom({ requestId, requestCloseToken, requestViewToken, in
 
   if (!request) {
     return (
-      <div className="mx-auto max-w-2xl rounded-xl border border-red-200 bg-red-50 p-5 text-center">
-        <AlertCircle className="mx-auto h-7 w-7 text-red-700" />
-        <p role="alert" className="mt-2 text-sm text-red-800">{loadError || 'Request not found.'}</p>
+      <div className="mx-auto max-w-2xl space-y-6 p-4 sm:p-6">
+        <div className="rounded-2xl border border-red-200 bg-red-50/80 p-6 text-center shadow-sm">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-red-600 mb-3">
+            <AlertCircle className="h-6 w-6" />
+          </div>
+          <h2 className="text-lg font-bold text-slate-900">
+            {isHi ? 'अनुरोध नहीं मिला या समाप्त हो चुका है' : 'Emergency Request Not Found'}
+          </h2>
+          <p role="alert" className="mt-2 text-sm text-slate-600 max-w-md mx-auto">
+            {loadError ||
+              (isHi
+                ? 'यह आपातकालीन रक्त अनुरोध मौजूद नहीं है, समाप्त हो चुका है या गलत आईडी दर्ज की गई है।'
+                : 'This blood request does not exist, has expired, or the ID was entered incorrectly.')}
+          </p>
+          <div className="mt-5 flex flex-col sm:flex-row items-center justify-center gap-3">
+            <Link
+              href={`/${locale}/request`}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white hover:bg-rose-700 shadow-sm transition w-full sm:w-auto"
+            >
+              <PlusCircle className="h-4 w-4" />
+              <span>{isHi ? 'नया आपातकालीन अनुरोध बनाएं' : 'Create New Emergency Request'}</span>
+            </Link>
+          </div>
+        </div>
+
+        {/* National Emergency Helplines (H-07) */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+          <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3">
+            {isHi ? 'तत्काल राष्ट्रीय आपातकालीन हेल्पलाइन' : 'Immediate National Emergency Helplines'}
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <a
+              href="tel:108"
+              className="flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:border-rose-300 hover:bg-rose-50/50 transition group"
+            >
+              <div>
+                <div className="text-xs text-slate-500 font-medium">{isHi ? 'एम्बुलेंस और आपातकालीन चिकित्सा' : 'Ambulance & Emergency Medical'}</div>
+                <div className="text-base font-extrabold text-slate-900 group-hover:text-rose-600">108</div>
+              </div>
+              <PhoneCall className="h-4 w-4 text-slate-400 group-hover:text-rose-600" />
+            </a>
+
+            <a
+              href="tel:104"
+              className="flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:border-rose-300 hover:bg-rose-50/50 transition group"
+            >
+              <div>
+                <div className="text-xs text-slate-500 font-medium">{isHi ? 'राष्ट्रीय रक्त हेल्पलाइन / स्वास्थ्य सूचना' : 'National Blood Bank Helpline'}</div>
+                <div className="text-base font-extrabold text-slate-900 group-hover:text-rose-600">104</div>
+              </div>
+              <PhoneCall className="h-4 w-4 text-slate-400 group-hover:text-rose-600" />
+            </a>
+
+            <a
+              href="tel:1910"
+              className="flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:border-rose-300 hover:bg-rose-50/50 transition group"
+            >
+              <div>
+                <div className="text-xs text-slate-500 font-medium">{isHi ? 'नाको रक्त संचरण सेवा' : 'NACO Blood Transfusion Helpline'}</div>
+                <div className="text-base font-extrabold text-slate-900 group-hover:text-rose-600">1910</div>
+              </div>
+              <PhoneCall className="h-4 w-4 text-slate-400 group-hover:text-rose-600" />
+            </a>
+
+            <a
+              href="tel:112"
+              className="flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:border-rose-300 hover:bg-rose-50/50 transition group"
+            >
+              <div>
+                <div className="text-xs text-slate-500 font-medium">{isHi ? 'अखिल भारतीय आपातकालीन नंबर' : 'All-India Unified Emergency'}</div>
+                <div className="text-base font-extrabold text-slate-900 group-hover:text-rose-600">112</div>
+              </div>
+              <PhoneCall className="h-4 w-4 text-slate-400 group-hover:text-rose-600" />
+            </a>
+          </div>
+        </div>
       </div>
     );
   }
@@ -228,16 +317,68 @@ export function WaitingRoom({ requestId, requestCloseToken, requestViewToken, in
           })}
         </section>
       )}
+      {/* Verified Blood Bank Found Card (H-02) */}
+      {hasBankStock && request.matchedBankName && (
+        <section className="space-y-3 rounded-2xl border-2 border-emerald-500 bg-emerald-50/90 p-5 shadow-lg animate-in fade-in duration-300">
+          <div className="flex items-center gap-2">
+            <Building2 className="h-6 w-6 text-emerald-700" />
+            <h2 className="text-lg font-black text-emerald-950">
+              {isHi ? '🏥 निकटतम ब्लड बैंक में स्टॉक उपलब्ध:' : '🏥 Blood Bank Stock Available:'}
+            </h2>
+          </div>
+          <Card className="border-emerald-300 bg-white shadow-sm">
+            <CardContent className="flex flex-col justify-between gap-4 p-5 sm:flex-row sm:items-center">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <p className="text-base font-black text-slate-900">{request.matchedBankName}</p>
+                  <Badge variant="success" className="font-bold text-xs">
+                    {request.matchedBankVerificationStatus || 'Verified Stock'}
+                  </Badge>
+                </div>
+                {request.matchedBankAddress && (
+                  <p className="text-xs text-slate-600 font-medium">
+                    📍 {request.matchedBankAddress}
+                  </p>
+                )}
+                {request.matchedBankDistanceKm !== null && request.matchedBankDistanceKm !== undefined && (
+                  <p className="text-xs text-slate-600 font-medium">
+                    🚗 {request.matchedBankDistanceKm.toFixed(1)} km away from hospital
+                  </p>
+                )}
+                {request.matchedBankPhone && (
+                  <p className="text-sm font-black text-emerald-800 font-mono tracking-wide">
+                    {request.matchedBankPhone}
+                  </p>
+                )}
+              </div>
+              {request.matchedBankPhone && (
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <a
+                    href={`tel:${request.matchedBankPhone}`}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-black text-white hover:bg-emerald-700 shadow transition"
+                  >
+                    <PhoneCall className="h-4 w-4" />
+                    {isHi ? 'ब्लड बैंक को कॉल करें' : 'Call Blood Bank'}
+                  </a>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </section>
+      )}
+
       <Card className={isFulfilled ? 'border-emerald-300 bg-emerald-50/50' : isClosed ? 'border-slate-300 bg-slate-50' : 'border-red-200'}>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between gap-3">
-            <Badge variant={isFulfilled || hasBankStock ? 'success' : 'outline'}>
+            <Badge variant={isFulfilled || hasBankStock ? 'success' : isClosed ? 'secondary' : 'outline'}>
               {hasBankStock
                 ? (isHi ? 'ब्लड बैंक स्टॉक उपलब्ध' : 'Blood bank stock found')
                 : isFulfilled
                   ? (isHi ? 'दाता ने अनुरोध स्वीकार किया' : 'Donor accepted')
-                  : isClosed
-                  ? (isHi ? 'खोज बंद' : 'Search closed')
+                  : isCancelled
+                  ? (isHi ? 'अनुरोध रद्द' : 'Search cancelled')
+                  : isExpired
+                  ? (isHi ? 'अनुरोध समाप्त' : 'Request expired')
                   : (isHi ? 'प्रतिक्रिया की प्रतीक्षा' : 'Waiting for responses')}
             </Badge>
             <span className="text-[11px] text-slate-500 font-mono">#{requestId}</span>
@@ -258,10 +399,15 @@ export function WaitingRoom({ requestId, requestCloseToken, requestViewToken, in
               <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
               <p>{isHi ? 'एक या अधिक रक्तदाताओं ने अनुरोध स्वीकार किया है। नीचे उनके संपर्क विवरण उपलब्ध हैं।' : 'One or more registered donors accepted this request. Their contact details are shown below.'}</p>
             </div>
-          ) : isClosed ? (
+          ) : isCancelled ? (
             <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-700">
               <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
-              <p>{isHi ? 'यह खोज बंद कर दी गई है। अब इस अनुरोध के लिए नए अलर्ट नहीं भेजे जाएंगे।' : 'This search is closed. No further alerts will be sent for this request.'}</p>
+              <p>{isHi ? 'यह खोज बंद कर दी गई है। अब इस अनुरोध के लिए नए अलर्ट नहीं भेजे जाएंगे।' : 'This search was cancelled by the requester. No further alerts will be sent for this request.'}</p>
+            </div>
+          ) : isExpired ? (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <Clock className="mt-0.5 h-5 w-5 shrink-0" />
+              <p>{isHi ? 'इस अनुरोध की समय-सीमा समाप्त हो चुकी है। कृपया नया आपातकालीन अनुरोध बनाएं।' : 'This emergency request has expired. Please create a new request or call emergency helplines.'}</p>
             </div>
           ) : pushSent ? (
             <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">

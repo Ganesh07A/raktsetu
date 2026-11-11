@@ -75,6 +75,13 @@ export interface BloodRequest {
   searchRadiusKm: number;
   status: RequestStatus;
   fulfillmentSource: FulfillmentSource | null;
+  matchedBankId?: string | null;
+  matchedBankName?: string | null;
+  matchedBankPhone?: string | null;
+  matchedBankAddress?: string | null;
+  matchedBankDistanceKm?: number | null;
+  matchedBankProvenance?: BloodBankSource | null;
+  matchedBankVerificationStatus?: StockVerificationStatus | null;
   createdAt: Date | string;
   expiresAt: Date | string | null;
 }

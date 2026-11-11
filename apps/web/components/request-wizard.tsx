@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { useLocale } from 'next-intl';
+import { useSearchParams } from 'next/navigation';
 import { useRouter } from '../src/routing';
 import { Button } from '@repo/ui/button';
 import { MapView, type MapMarkerItem } from './map-view';
@@ -95,14 +96,44 @@ export function RequestWizard() {
   const locale = useLocale();
   const isHi = locale === 'hi';
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Validate and read bloodGroup deep link parameter (H-01)
+  const initialBloodGroup = React.useMemo<BloodGroup | null>(() => {
+    const raw = searchParams?.get('bloodGroup');
+    if (!raw) return null;
+    let str = raw.trim();
+    if (raw.endsWith(' ') && !str.endsWith('+') && !str.endsWith('-')) {
+      str += '+';
+    }
+    const normalized = str.replace(/\s+/g, '+').toUpperCase();
+    return (BLOOD_GROUPS as readonly string[]).includes(normalized)
+      ? (normalized as BloodGroup)
+      : null;
+  }, [searchParams]);
 
   // Wizard Navigation
   const [currentStep, setCurrentStep] = React.useState<WizardStep>('STEP_1_BLOOD_GROUP');
   const [stepHistory, setStepHistory] = React.useState<WizardStep[]>(['STEP_1_BLOOD_GROUP']);
 
-  // Step 1: Blood Group
-  const [selectedBloodGroup, setSelectedBloodGroup] = React.useState<BloodGroup | null>('AB+');
+  // Step 1: Blood Group (never silently defaults to AB+; null prompts explicit selection)
+  const [selectedBloodGroup, setSelectedBloodGroup] = React.useState<BloodGroup | null>(initialBloodGroup);
   const [showGroupHelperModal, setShowGroupHelperModal] = React.useState(false);
+
+  React.useEffect(() => {
+    if (initialBloodGroup) {
+      setSelectedBloodGroup(initialBloodGroup);
+    }
+  }, [initialBloodGroup]);
+
+  const handleSelectBloodGroup = (group: BloodGroup) => {
+    setSelectedBloodGroup(group);
+    if (typeof window !== 'undefined' && window.history?.replaceState) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('bloodGroup', group);
+      window.history.replaceState({}, '', url.toString());
+    }
+  };
 
   // Step 2: Location
   const [locationType, setLocationType] = React.useState<'precise' | 'approximate'>('precise');
@@ -223,14 +254,17 @@ export function RequestWizard() {
     }
   };
 
-  // Language toggle
+  // Language toggle - preserves deep linked blood group
   const toggleLanguage = () => {
     const nextLocale = isHi ? 'en' : 'hi';
     const currentPath = window.location.pathname;
     const newPath = currentPath.startsWith('/hi')
       ? currentPath.replace('/hi', '/en')
       : currentPath.replace('/en', '/hi');
-    window.location.href = newPath;
+    const search = selectedBloodGroup
+      ? `?bloodGroup=${encodeURIComponent(selectedBloodGroup)}`
+      : (typeof window !== 'undefined' ? window.location.search : '');
+    window.location.href = newPath + search;
   };
 
   // Reverse geocodes coordinates to State, District, and Area
@@ -504,6 +538,10 @@ export function RequestWizard() {
   };
 
   const handleFindDonors = async () => {
+    if (!selectedBloodGroup) {
+      setDonorLookupError(isHi ? 'कृपया पहले रक्त समूह चुनें।' : 'Select a blood group first.');
+      return;
+    }
     if (!isLocationResolved) {
       setDonorLookupError(isHi ? 'पहले अपना स्थान तय करें।' : 'Resolve your location before searching for donors.');
       return;
@@ -513,7 +551,7 @@ export function RequestWizard() {
     setDonorLookupError(null);
     try {
       const query = new URLSearchParams({
-        bloodGroup: selectedBloodGroup || 'AB+',
+        bloodGroup: selectedBloodGroup,
         lat: lat.toString(),
         lng: lng.toString(),
         radiusKm: radiusKm.toString(),
@@ -535,6 +573,11 @@ export function RequestWizard() {
   // Dispatch an actual blood request. The API determines matching subscribed donors and sends FCM.
   const handleSendRequest = async () => {
     setRequestError(null);
+    if (!selectedBloodGroup) {
+      setRequestError(isHi ? 'कृपया पहले मरीज़ का रक्त समूह चुनें।' : 'Select the patient blood group before sending the request.');
+      setCurrentStep('STEP_1_BLOOD_GROUP');
+      return;
+    }
     if (!patientName.trim()) {
       setRequestError(isHi ? 'कृपया मरीज़ का नाम दर्ज करें।' : 'Enter the patient name before sending the request.');
       return;
@@ -553,7 +596,7 @@ export function RequestWizard() {
 
     try {
       const payload = {
-        bloodGroupNeeded: selectedBloodGroup || 'AB+',
+        bloodGroupNeeded: selectedBloodGroup,
         componentType: selectedComponent,
         unitsNeeded: Number(unitsNeeded) || 1,
         patientName: patientName.trim(),
@@ -770,7 +813,7 @@ export function RequestWizard() {
                     <button
                       key={group}
                       type="button"
-                      onClick={() => setSelectedBloodGroup(group)}
+                      onClick={() => handleSelectBloodGroup(group)}
                       className={`h-24 rounded-2xl border flex flex-col items-center justify-center transition-all ${
                         isSelected
                           ? 'border-rose-500 bg-rose-50/70 ring-2 ring-rose-500/20 text-rose-700 shadow-sm'

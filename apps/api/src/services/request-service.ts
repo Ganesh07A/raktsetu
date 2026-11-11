@@ -62,6 +62,13 @@ export class RequestService {
             searchRadiusKm: request.searchRadiusKm,
             status: request.status,
             fulfillmentSource: (request.fulfillmentSource as any) ?? null,
+            matchedBankId: request.matchedBankId ?? null,
+            matchedBankName: request.matchedBankName ?? null,
+            matchedBankPhone: request.matchedBankPhone ?? null,
+            matchedBankAddress: request.matchedBankAddress ?? null,
+            matchedBankDistanceKm: request.matchedBankDistanceKm ?? null,
+            matchedBankProvenance: request.matchedBankProvenance ?? null,
+            matchedBankVerificationStatus: request.matchedBankVerificationStatus ?? null,
             createdAt: request.createdAt ? new Date(request.createdAt) : new Date(),
             expiresAt: request.expiresAt ? new Date(request.expiresAt) : null,
           })
@@ -351,6 +358,88 @@ export class RequestService {
   }
 
   /**
+   * Update request status enforcing strict state machine transitions and terminal state protection.
+   */
+  public async updateRequestStatus(
+    requestId: string,
+    targetStatus: RequestStatus,
+    fulfillmentSource?: string | null
+  ): Promise<{ success: boolean; requestStatus?: RequestStatus; error?: string }> {
+    const ALLOWED_TRANSITIONS: Record<RequestStatus, RequestStatus[]> = {
+      searching: ['bank_found', 'donors_notified', 'cancelled', 'expired'],
+      bank_found: ['donors_notified', 'fulfilled', 'cancelled', 'expired'],
+      donors_notified: ['fulfilled', 'cancelled', 'expired'],
+      fulfilled: ['donors_notified'], // only allowed if sole accepted donor declines
+      cancelled: [], // terminal
+      expired: [], // terminal
+    };
+
+    if (!this.isLiveDb()) {
+      const existing = mockStore.getRequest(requestId);
+      if (!existing) return { success: false, error: `Request ${requestId} not found` };
+
+      const currentStatus = existing.status;
+      if (currentStatus === targetStatus) {
+        return { success: true, requestStatus: currentStatus };
+      }
+      const allowed = ALLOWED_TRANSITIONS[currentStatus] || [];
+      if (!allowed.includes(targetStatus)) {
+        return {
+          success: false,
+          error: `Illegal state transition from ${currentStatus} to ${targetStatus}`,
+        };
+      }
+      existing.status = targetStatus;
+      if (fulfillmentSource !== undefined) existing.fulfillmentSource = fulfillmentSource as any;
+      return { success: true, requestStatus: targetStatus };
+    }
+
+    return await db.transaction(async (tx) => {
+      const rows = await tx
+        .select()
+        .from(bloodRequests)
+        .where(eq(bloodRequests.id, requestId))
+        .for('update')
+        .limit(1);
+
+      if (!rows[0]) return { success: false, error: `Request ${requestId} not found` };
+
+      const currentStatus = rows[0].status as RequestStatus;
+      if (currentStatus === targetStatus) {
+        return { success: true, requestStatus: currentStatus };
+      }
+
+      const allowed = ALLOWED_TRANSITIONS[currentStatus] || [];
+      if (!allowed.includes(targetStatus)) {
+        return {
+          success: false,
+          error: `Illegal state transition from ${currentStatus} to ${targetStatus}`,
+        };
+      }
+
+      const updated = await tx
+        .update(bloodRequests)
+        .set({
+          status: targetStatus,
+          ...(fulfillmentSource !== undefined ? { fulfillmentSource: fulfillmentSource as any } : {}),
+        })
+        .where(eq(bloodRequests.id, requestId))
+        .returning();
+
+      if (updated.length === 0) {
+        return { success: false, error: `Failed to update status for request ${requestId}` };
+      }
+
+      mockStore.updateRequest(requestId, {
+        status: targetStatus,
+        ...(fulfillmentSource !== undefined ? { fulfillmentSource: fulfillmentSource as any } : {}),
+      });
+
+      return { success: true, requestStatus: targetStatus };
+    });
+  }
+
+  /**
    * Fetch blood request and accepted donor contacts
    */
   public async getRequestWithDetails(id: string): Promise<{
@@ -390,6 +479,13 @@ export class RequestService {
             searchRadiusKm: r.searchRadiusKm as RadiusPreset,
             status: r.status as RequestStatus,
             fulfillmentSource: r.fulfillmentSource as any,
+            matchedBankId: r.matchedBankId,
+            matchedBankName: r.matchedBankName,
+            matchedBankPhone: r.matchedBankPhone,
+            matchedBankAddress: r.matchedBankAddress,
+            matchedBankDistanceKm: r.matchedBankDistanceKm,
+            matchedBankProvenance: r.matchedBankProvenance as any,
+            matchedBankVerificationStatus: r.matchedBankVerificationStatus as any,
             createdAt: r.createdAt.toISOString(),
             expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null,
           };

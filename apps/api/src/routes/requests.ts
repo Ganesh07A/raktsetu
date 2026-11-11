@@ -21,6 +21,7 @@ import {
 } from '../services/donor-session';
 import { eraktkoshProxy } from '../services/eraktkosh-proxy';
 import { requestService } from '../services/request-service';
+import { notificationOutbox } from '../services/notification-outbox';
 import { rateLimiter, getClientIp } from '../middleware/rate-limiter';
 
 export const requestRoutes = new Hono();
@@ -132,7 +133,7 @@ requestRoutes.post('/', requestCreationRateLimiter, async (c) => {
     districtCode: district,
   });
 
-  const bankFound = bankSearch.banks.some((bank) => {
+  const matchedBank = bankSearch.banks.find((bank) => {
     const measuredNearby = bank.distanceKm !== null && bank.distanceKm <= radiusKm;
     const hasRequiredStock = bank.stock.some((stock) =>
       stock.bloodGroup === bloodGroupNeeded &&
@@ -142,6 +143,8 @@ requestRoutes.post('/', requestCreationRateLimiter, async (c) => {
     // A bank whose distance is unknown or unverified is not treated as radius-confirmed stock.
     return measuredNearby && hasRequiredStock;
   });
+
+  const bankFound = Boolean(matchedBank);
 
   const newRequest: BloodRequest = {
     id: requestId,
@@ -160,6 +163,13 @@ requestRoutes.post('/', requestCreationRateLimiter, async (c) => {
     searchRadiusKm: radiusKm,
     status: bankFound ? 'bank_found' : 'donors_notified',
     fulfillmentSource: bankFound ? 'blood_bank' : null,
+    matchedBankId: matchedBank ? matchedBank.id : null,
+    matchedBankName: matchedBank ? matchedBank.name : null,
+    matchedBankPhone: matchedBank ? matchedBank.phone : null,
+    matchedBankAddress: matchedBank ? (matchedBank.address || `${matchedBank.district}, ${matchedBank.state}`) : null,
+    matchedBankDistanceKm: matchedBank ? matchedBank.distanceKm : null,
+    matchedBankProvenance: matchedBank ? (matchedBank.source || 'eraktkosh') : null,
+    matchedBankVerificationStatus: matchedBank ? 'source_reported' : null,
     createdAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
   };
@@ -181,6 +191,7 @@ requestRoutes.post('/', requestCreationRateLimiter, async (c) => {
   if (!bankFound) {
     const matchedDonors = await donorMatcher.findCompatibleDonors({
       recipientBloodGroup: bloodGroupNeeded as BloodGroup,
+      componentType: componentType as ComponentType,
       latitude,
       longitude,
       radiusKm,
@@ -190,55 +201,26 @@ requestRoutes.post('/', requestCreationRateLimiter, async (c) => {
     const eligibleDonors = matchedDonors.slice(0, maxDonorsPerRequest);
     compatibleDonorsCount = eligibleDonors.length;
 
-    if (notificationsEnabled) {
-      for (const donor of eligibleDonors) {
-        const notifId = `notif-${requestId}-${donor.id}`;
-
-        // Mask phone number for privacy until donor accepts (C-03)
-        const maskedPhone = donor.phone.replace(
-          /(\+\d{2})(\d{2})\d{4}(\d{4})/,
-          '$1 $2****$3'
-        );
-
-        const responseToken = createDonorResponseToken(requestId, donor.id);
-        await requestService.recordNotification({
-          id: notifId,
-          requestId,
-          donorId: donor.id,
-          status: 'pending',
-          donorName: donor.name,
-          donorBloodGroup: donor.bloodGroup,
-          donorPhoneMasked: maskedPhone,
-          sentAt: new Date().toISOString(),
-        });
-
-        const deviceTokens = await requestService.getPushTokensForDonor(donor.id);
-        const sendResult = await pushNotificationService.sendDonationRequest({
-          tokens: deviceTokens,
-          requestId,
-          responseToken,
-          bloodGroup: newRequest.bloodGroupNeeded,
+    if (notificationsEnabled && eligibleDonors.length > 0) {
+      const outboxSummary = await notificationOutbox.enqueue({
+        requestId,
+        bloodGroupNeeded: newRequest.bloodGroupNeeded,
+        donors: eligibleDonors.map((donor) => ({
+          id: donor.id,
+          name: donor.name,
+          phone: donor.phone,
+          bloodGroup: donor.bloodGroup,
           distanceKm: donor.distanceKm,
-          language: donor.preferredLanguage || 'en',
-        });
-
-        await requestService.updateNotificationDelivery({
-          requestId,
-          donorId: donor.id,
-          status: sendResult.success ? 'sent' : 'failed',
-          pushMessageId: sendResult.messageId,
-        });
-
-        for (const invalidToken of sendResult.invalidTokens) {
-          await requestService.removePushSubscriptionToken(donor.id, invalidToken);
-        }
-        if (sendResult.success) notificationsSent++;
-      }
+          preferredLanguage: donor.preferredLanguage,
+        })),
+      });
+      notificationsSent = outboxSummary.sentCount;
     }
   }
 
   const responsePayload = {
     request: newRequest,
+    status: newRequest.status,
     compatibleDonorsCount,
     notificationsSent,
     requestViewToken: createRequestViewToken(requestId),
@@ -342,17 +324,20 @@ requestRoutes.patch('/:id/status', async (c) => {
     return c.json({ error: 'Unauthorized request status update' }, 401);
   }
 
-  const request = mockStore.getRequest(id);
-  if (!request) {
-    return c.json({ error: `Request ${id} not found` }, 404);
+  if (!body?.status) {
+    return c.json({ error: 'Target status is required' }, 400);
   }
 
-  if (body.status) {
-    request.status = body.status;
-  }
-  if (body.fulfillmentSource) {
-    request.fulfillmentSource = body.fulfillmentSource;
+  const result = await requestService.updateRequestStatus(
+    id,
+    body.status,
+    body.fulfillmentSource
+  );
+
+  if (!result.success) {
+    const isNotFound = result.error?.includes('not found');
+    return c.json({ error: result.error }, isNotFound ? 404 : 409);
   }
 
-  return c.json({ success: true, updatedStatus: request.status });
+  return c.json({ success: true, updatedStatus: result.requestStatus });
 });
