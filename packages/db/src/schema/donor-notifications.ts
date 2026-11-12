@@ -40,6 +40,7 @@ export const donorNotifications = pgTable(
     nextRetryAt: timestamp('next_retry_at', { withTimezone: true }).defaultNow(),
     lockedBy: text('locked_by'),
     lockedAt: timestamp('locked_at', { withTimezone: true }),
+    leaseToken: text('lease_token'),
     errorDetails: text('error_details'),
   },
   (table) => [
@@ -50,6 +51,7 @@ export const donorNotifications = pgTable(
     index('notifications_donor_idx').on(table.donorId),
     index('notifications_push_id_idx').on(table.pushMessageId),
     index('notifications_outbox_queue_idx').on(table.status, table.nextRetryAt),
+    index('notifications_lease_token_idx').on(table.leaseToken),
   ]
 );
 

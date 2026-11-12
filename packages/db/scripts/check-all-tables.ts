@@ -10,7 +10,7 @@ if (!url) {
 const sql = postgres(url, { max: 1 });
 
 async function run() {
-  const tables = ['blood_requests', 'donor_profiles', 'users', 'donor_push_subscriptions'];
+  const tables = ['blood_requests', 'donor_profiles', 'users', 'donor_push_subscriptions', 'donor_notifications'];
   for (const tableName of tables) {
     const cols = await sql`
       SELECT column_name

@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run --hot src/index.ts",
+    "dev": "bun run scripts/dev.ts",
     "build": "bun build src/index.ts --outdir dist --target bun",
     "start": "bun run dist/index.js",
+    "start:worker": "bun run src/worker.ts",
     "lint": "eslint . --max-warnings 0",
     "check-types": "tsc --noEmit"
   },

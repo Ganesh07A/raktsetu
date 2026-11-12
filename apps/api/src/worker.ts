@@ -22,3 +22,4 @@ process.on('SIGINT', () => {
   notificationOutbox.stopWorker();
   process.exit(0);
 });
+

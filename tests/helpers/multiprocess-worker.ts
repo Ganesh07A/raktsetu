@@ -64,6 +64,7 @@ async function main() {
           SET status = 'processing',
               locked_by = ${workerId},
               locked_at = NOW(),
+              lease_token = gen_random_uuid()::text,
               attempts = attempts + 1
           WHERE id = ${notifId};
         `);

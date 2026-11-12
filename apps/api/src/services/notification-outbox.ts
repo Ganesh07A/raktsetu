@@ -39,6 +39,7 @@ export interface ClaimedNotification {
   attempts: number;
   maxAttempts: number;
   status: string;
+  leaseToken: string;
 }
 
 export interface OutboxMetrics {
@@ -130,10 +131,50 @@ export class NotificationOutboxService {
 
     for (const donor of item.donors) {
       const notifId = `notif-${item.requestId}-${donor.id}`;
+      let leaseToken = crypto.randomUUID();
+
+      if (this.isLiveDb()) {
+        const claimed = await db.execute(sql`
+          UPDATE donor_notifications
+          SET status = 'processing',
+              locked_by = ${this.currentWorkerId},
+              locked_at = NOW(),
+              lease_token = ${leaseToken},
+              attempts = attempts + 1,
+              last_attempted_at = NOW()
+          WHERE id = ${notifId}
+            AND (
+              status = 'pending'
+              OR (status = 'processing' AND locked_at < NOW() - INTERVAL '120 seconds')
+            )
+          RETURNING id, lease_token as "leaseToken";
+        `);
+        if (!claimed || claimed.length === 0) {
+          continue;
+        }
+        leaseToken = (claimed[0] as any).leaseToken || leaseToken;
+      } else {
+        const all = mockStore.getAllNotifications();
+        const n = all.find((x) => x.id === notifId);
+        if (n) {
+          const isPending = n.status === 'pending';
+          const isStale =
+            n.status === 'processing' &&
+            (n as any).lockedAt &&
+            Date.now() - new Date((n as any).lockedAt).getTime() > 120000;
+          if (!isPending && !isStale) continue;
+          n.status = 'processing';
+          (n as any).lockedBy = this.currentWorkerId;
+          (n as any).lockedAt = new Date().toISOString();
+          (n as any).leaseToken = leaseToken;
+          (n as any).attempts = ((n as any).attempts || 0) + 1;
+        }
+      }
+
       const reqDetails = await requestService.getRequestWithDetails(item.requestId);
       const req = reqDetails?.request;
       if (req && (req.status === 'cancelled' || req.status === 'expired' || req.status === 'fulfilled')) {
-        await this.markTerminal(notifId, item.requestId, donor.id, req.status, this.currentWorkerId);
+        await this.markTerminal(notifId, item.requestId, donor.id, req.status, leaseToken, this.currentWorkerId);
         cancelledCount++;
         continue;
       }
@@ -142,7 +183,7 @@ export class NotificationOutboxService {
       const deviceTokens = await requestService.getPushTokensForDonor(donor.id);
 
       if (deviceTokens.length === 0) {
-        await this.markFailed(notifId, item.requestId, donor.id, 'No push tokens registered', this.currentWorkerId);
+        await this.markFailed(notifId, item.requestId, donor.id, 'No push tokens registered', leaseToken, this.currentWorkerId);
         failedCount++;
         continue;
       }
@@ -182,14 +223,14 @@ export class NotificationOutboxService {
       }
 
       if (success) {
-        const ok = await this.markSent(notifId, item.requestId, donor.id, lastResult?.messageId ?? null, this.currentWorkerId);
+        const ok = await this.markSent(notifId, item.requestId, donor.id, lastResult?.messageId ?? null, leaseToken, this.currentWorkerId);
         if (ok) sentCount++;
       } else {
         if (attempt >= 3) {
-          const ok = await this.markExhausted(notifId, item.requestId, donor.id, lastError, this.currentWorkerId);
+          const ok = await this.markExhausted(notifId, item.requestId, donor.id, lastError, leaseToken, this.currentWorkerId);
           if (ok) exhaustedCount++;
         } else {
-          const ok = await this.markRetry(notifId, item.requestId, donor.id, 5, lastError, this.currentWorkerId);
+          const ok = await this.markRetry(notifId, item.requestId, donor.id, 5, lastError, leaseToken, this.currentWorkerId);
           if (ok) failedCount++;
         }
       }
@@ -240,6 +281,7 @@ export class NotificationOutboxService {
         SET status = 'processing',
             locked_by = ${workerId},
             locked_at = NOW(),
+            lease_token = gen_random_uuid()::text,
             attempts = dn.attempts + 1,
             last_attempted_at = NOW()
         FROM claimable
@@ -250,7 +292,8 @@ export class NotificationOutboxService {
           dn.donor_id as "donorId",
           dn.attempts,
           dn.max_attempts as "maxAttempts",
-          dn.status;
+          dn.status,
+          dn.lease_token as "leaseToken";
       `);
 
       return (rows as unknown as ClaimedNotification[]).map((r) => ({
@@ -260,6 +303,7 @@ export class NotificationOutboxService {
         attempts: Number(r.attempts),
         maxAttempts: Number(r.maxAttempts),
         status: String(r.status),
+        leaseToken: String(r.leaseToken),
       }));
     } catch (err) {
       console.error('[@repo/api] Error claiming outbox batch:', err);
@@ -280,11 +324,13 @@ export class NotificationOutboxService {
         Date.now() - new Date((notif as any).lockedAt).getTime() > 120000;
 
       if (isPending || isStale) {
+        const leaseToken = crypto.randomUUID();
         notif.status = 'processing';
         (notif as any).attempts = ((notif as any).attempts || 0) + 1;
         (notif as any).maxAttempts = (notif as any).maxAttempts || 3;
         (notif as any).lockedBy = workerId;
         (notif as any).lockedAt = new Date().toISOString();
+        (notif as any).leaseToken = leaseToken;
 
         claimed.push({
           id: notif.id,
@@ -293,6 +339,7 @@ export class NotificationOutboxService {
           attempts: (notif as any).attempts,
           maxAttempts: (notif as any).maxAttempts,
           status: 'processing',
+          leaseToken,
         });
       }
     }
@@ -319,7 +366,7 @@ export class NotificationOutboxService {
 
       if (!req || req.status === 'cancelled' || req.status === 'expired' || req.status === 'fulfilled') {
         const terminalReason = req ? req.status : 'not_found';
-        await this.markTerminal(item.id, item.requestId, item.donorId, terminalReason, workerId);
+        await this.markTerminal(item.id, item.requestId, item.donorId, terminalReason, item.leaseToken, workerId);
         cancelledCount++;
         continue;
       }
@@ -327,8 +374,7 @@ export class NotificationOutboxService {
       // 2. Query donor device tokens
       const deviceTokens = await requestService.getPushTokensForDonor(item.donorId);
       if (deviceTokens.length === 0) {
-        // No registered device tokens
-        await this.markFailed(item.id, item.requestId, item.donorId, 'No push tokens registered', workerId);
+        await this.markFailed(item.id, item.requestId, item.donorId, 'No push tokens registered', item.leaseToken, workerId);
         failedCount++;
         continue;
       }
@@ -359,15 +405,15 @@ export class NotificationOutboxService {
       }
 
       if (dispatchSuccess) {
-        const ok = await this.markSent(item.id, item.requestId, item.donorId, lastResult?.messageId ?? null, workerId);
+        const ok = await this.markSent(item.id, item.requestId, item.donorId, lastResult?.messageId ?? null, item.leaseToken, workerId);
         if (ok) sentCount++;
       } else {
         if (item.attempts >= item.maxAttempts) {
-          const ok = await this.markExhausted(item.id, item.requestId, item.donorId, dispatchError, workerId);
+          const ok = await this.markExhausted(item.id, item.requestId, item.donorId, dispatchError, item.leaseToken, workerId);
           if (ok) exhaustedCount++;
         } else {
           const backoffSeconds = Math.min(300, Math.pow(2, item.attempts) * 2);
-          const ok = await this.markRetry(item.id, item.requestId, item.donorId, backoffSeconds, dispatchError, workerId);
+          const ok = await this.markRetry(item.id, item.requestId, item.donorId, backoffSeconds, dispatchError, item.leaseToken, workerId);
           if (ok) failedCount++;
         }
       }
@@ -478,17 +524,30 @@ export class NotificationOutboxService {
 
   /**
    * Renew worker lease on an actively processing notification.
+   * Conditioned on exact match of id, current leaseToken, workerId, and processing status.
    */
   public async renewLease(
     id: string,
+    leaseToken: string,
     workerId: string = this.currentWorkerId
   ): Promise<boolean> {
-    if (!this.isLiveDb()) return true;
+    if (!this.isLiveDb()) {
+      const all = mockStore.getAllNotifications();
+      const n = all.find((item) => item.id === id);
+      if (!n || (n as any).leaseToken !== leaseToken || (n as any).lockedBy !== workerId || n.status !== 'processing') {
+        return false;
+      }
+      (n as any).lockedAt = new Date().toISOString();
+      return true;
+    }
     try {
       const rows = await db.execute(sql`
         UPDATE donor_notifications
         SET locked_at = NOW()
-        WHERE id = ${id} AND locked_by = ${workerId}
+        WHERE id = ${id}
+          AND lease_token = ${leaseToken}
+          AND locked_by = ${workerId}
+          AND status = 'processing'
         RETURNING id;
       `);
       return Boolean(rows && rows.length > 0);
@@ -497,11 +556,12 @@ export class NotificationOutboxService {
     }
   }
 
-  private async markTerminal(
+  public async markTerminal(
     id: string,
     requestId: string,
     donorId: string,
     terminalStatus: string,
+    leaseToken: string,
     workerId: string = this.currentWorkerId
   ): Promise<boolean> {
     if (this.isLiveDb()) {
@@ -510,24 +570,41 @@ export class NotificationOutboxService {
         SET status = 'cancelled',
             locked_by = NULL,
             locked_at = NULL,
+            lease_token = NULL,
             error_details = ${'Terminal request state: ' + terminalStatus}
-        WHERE id = ${id} AND (locked_by = ${workerId} OR locked_by IS NULL)
+        WHERE id = ${id}
+          AND lease_token = ${leaseToken}
+          AND locked_by = ${workerId}
+          AND status = 'processing'
         RETURNING id;
       `);
       if (!rows || rows.length === 0) {
-        console.warn(`[@repo/api] Stale lease: worker ${workerId} lost lock for notification ${id}. Update discarded.`);
+        console.warn(`[@repo/api] Stale lease: worker ${workerId} with lease ${leaseToken} lost lock for notification ${id}. Update discarded.`);
         return false;
+      }
+    } else {
+      const all = mockStore.getAllNotifications();
+      const n = all.find((x) => x.id === id);
+      if (n) {
+        if ((n as any).leaseToken !== leaseToken || (n as any).lockedBy !== workerId || n.status !== 'processing') {
+          console.warn(`[@repo/api] Stale lease: worker ${workerId} with lease ${leaseToken} lost lock for notification ${id}. Update discarded.`);
+          return false;
+        }
+        (n as any).leaseToken = undefined;
+        (n as any).lockedBy = undefined;
+        (n as any).lockedAt = undefined;
       }
     }
     mockStore.setNotificationDelivery(requestId, donorId, 'cancelled');
     return true;
   }
 
-  private async markSent(
+  public async markSent(
     id: string,
     requestId: string,
     donorId: string,
     pushMessageId: string | null,
+    leaseToken: string,
     workerId: string = this.currentWorkerId
   ): Promise<boolean> {
     if (this.isLiveDb()) {
@@ -538,24 +615,41 @@ export class NotificationOutboxService {
             sent_at = NOW(),
             locked_by = NULL,
             locked_at = NULL,
+            lease_token = NULL,
             error_details = NULL
-        WHERE id = ${id} AND (locked_by = ${workerId} OR locked_by IS NULL)
+        WHERE id = ${id}
+          AND lease_token = ${leaseToken}
+          AND locked_by = ${workerId}
+          AND status = 'processing'
         RETURNING id;
       `);
       if (!rows || rows.length === 0) {
-        console.warn(`[@repo/api] Stale lease: worker ${workerId} lost lock for notification ${id}. Overwrite prevented.`);
+        console.warn(`[@repo/api] Stale lease: worker ${workerId} with lease ${leaseToken} lost lock for notification ${id}. Overwrite prevented.`);
         return false;
+      }
+    } else {
+      const all = mockStore.getAllNotifications();
+      const n = all.find((x) => x.id === id);
+      if (n) {
+        if ((n as any).leaseToken !== leaseToken || (n as any).lockedBy !== workerId || n.status !== 'processing') {
+          console.warn(`[@repo/api] Stale lease: worker ${workerId} with lease ${leaseToken} lost lock for notification ${id}. Overwrite prevented.`);
+          return false;
+        }
+        (n as any).leaseToken = undefined;
+        (n as any).lockedBy = undefined;
+        (n as any).lockedAt = undefined;
       }
     }
     mockStore.setNotificationDelivery(requestId, donorId, 'sent');
     return true;
   }
 
-  private async markFailed(
+  public async markFailed(
     id: string,
     requestId: string,
     donorId: string,
     error: string | null,
+    leaseToken: string,
     workerId: string = this.currentWorkerId
   ): Promise<boolean> {
     if (this.isLiveDb()) {
@@ -564,21 +658,40 @@ export class NotificationOutboxService {
         SET status = 'failed',
             locked_by = NULL,
             locked_at = NULL,
+            lease_token = NULL,
             error_details = ${error}
-        WHERE id = ${id} AND (locked_by = ${workerId} OR locked_by IS NULL)
+        WHERE id = ${id}
+          AND lease_token = ${leaseToken}
+          AND locked_by = ${workerId}
+          AND status = 'processing'
         RETURNING id;
       `);
-      if (!rows || rows.length === 0) return false;
+      if (!rows || rows.length === 0) {
+        console.warn(`[@repo/api] Stale lease: worker ${workerId} with lease ${leaseToken} lost lock for notification ${id}. Update discarded.`);
+        return false;
+      }
+    } else {
+      const all = mockStore.getAllNotifications();
+      const n = all.find((x) => x.id === id);
+      if (n) {
+        if ((n as any).leaseToken !== leaseToken || (n as any).lockedBy !== workerId || n.status !== 'processing') {
+          return false;
+        }
+        (n as any).leaseToken = undefined;
+        (n as any).lockedBy = undefined;
+        (n as any).lockedAt = undefined;
+      }
     }
     mockStore.setNotificationDelivery(requestId, donorId, 'failed');
     return true;
   }
 
-  private async markExhausted(
+  public async markExhausted(
     id: string,
     requestId: string,
     donorId: string,
     error: string | null,
+    leaseToken: string,
     workerId: string = this.currentWorkerId
   ): Promise<boolean> {
     if (this.isLiveDb()) {
@@ -587,22 +700,41 @@ export class NotificationOutboxService {
         SET status = 'exhausted',
             locked_by = NULL,
             locked_at = NULL,
+            lease_token = NULL,
             error_details = ${error}
-        WHERE id = ${id} AND (locked_by = ${workerId} OR locked_by IS NULL)
+        WHERE id = ${id}
+          AND lease_token = ${leaseToken}
+          AND locked_by = ${workerId}
+          AND status = 'processing'
         RETURNING id;
       `);
-      if (!rows || rows.length === 0) return false;
+      if (!rows || rows.length === 0) {
+        console.warn(`[@repo/api] Stale lease: worker ${workerId} with lease ${leaseToken} lost lock for notification ${id}. Update discarded.`);
+        return false;
+      }
+    } else {
+      const all = mockStore.getAllNotifications();
+      const n = all.find((x) => x.id === id);
+      if (n) {
+        if ((n as any).leaseToken !== leaseToken || (n as any).lockedBy !== workerId || n.status !== 'processing') {
+          return false;
+        }
+        (n as any).leaseToken = undefined;
+        (n as any).lockedBy = undefined;
+        (n as any).lockedAt = undefined;
+      }
     }
     mockStore.setNotificationDelivery(requestId, donorId, 'exhausted');
     return true;
   }
 
-  private async markRetry(
+  public async markRetry(
     id: string,
     requestId: string,
     donorId: string,
     backoffSeconds: number,
     error: string | null,
+    leaseToken: string,
     workerId: string = this.currentWorkerId
   ): Promise<boolean> {
     if (this.isLiveDb()) {
@@ -612,11 +744,29 @@ export class NotificationOutboxService {
             next_retry_at = NOW() + (${backoffSeconds} * INTERVAL '1 second'),
             locked_by = NULL,
             locked_at = NULL,
+            lease_token = NULL,
             error_details = ${error}
-        WHERE id = ${id} AND (locked_by = ${workerId} OR locked_by IS NULL)
+        WHERE id = ${id}
+          AND lease_token = ${leaseToken}
+          AND locked_by = ${workerId}
+          AND status = 'processing'
         RETURNING id;
       `);
-      if (!rows || rows.length === 0) return false;
+      if (!rows || rows.length === 0) {
+        console.warn(`[@repo/api] Stale lease: worker ${workerId} with lease ${leaseToken} lost lock for notification ${id}. Update discarded.`);
+        return false;
+      }
+    } else {
+      const all = mockStore.getAllNotifications();
+      const n = all.find((x) => x.id === id);
+      if (n) {
+        if ((n as any).leaseToken !== leaseToken || (n as any).lockedBy !== workerId || n.status !== 'processing') {
+          return false;
+        }
+        (n as any).leaseToken = undefined;
+        (n as any).lockedBy = undefined;
+        (n as any).lockedAt = undefined;
+      }
     }
     mockStore.setNotificationDelivery(requestId, donorId, 'pending');
     return true;

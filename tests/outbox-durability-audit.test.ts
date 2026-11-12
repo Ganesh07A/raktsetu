@@ -204,6 +204,7 @@ describe('Checkpoint 4.1: Notification Outbox Durability & Crash Recovery Audit'
       expect(fetched1!.notifications[0].status).toBe('sent');
 
       // 2. If a crash had occurred before status update (simulated: status remained 'pending'):
+      mockStore.setNotificationDelivery(requestId, donorId, 'pending');
       // If a naive re-try processes the same item again:
       const res2 = await notificationOutbox.processBatch(item);
       expect(fcmDispatchCount).toBe(2);
