@@ -175,7 +175,15 @@ requestRoutes.post('/', requestCreationRateLimiter, async (c) => {
   };
 
   // Durable request persistence must succeed before any notification fanout (C-02)
-  await requestService.createRequest(newRequest);
+  try {
+    await requestService.createRequest(newRequest);
+  } catch (err: any) {
+    console.error('[@repo/api] Durable persistence failed for blood request:', err);
+    return c.json(
+      { error: 'Database service unavailable. Could not safely persist emergency request.' },
+      500
+    );
+  }
 
   let compatibleDonorsCount = 0;
   let notificationsSent = 0;

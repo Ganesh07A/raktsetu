@@ -37,10 +37,7 @@ export class RequestService {
    * Persist a new blood request
    */
   public async createRequest(request: BloodRequest): Promise<BloodRequest> {
-    // 1. Always keep in-memory store in sync for fast lookup & mock mode
-    mockStore.createRequest(request);
-
-    // 2. Persist to live PostgreSQL database if available
+    // 1. Persist to live PostgreSQL database if configured (fail-closed in production)
     if (this.isLiveDb()) {
       try {
         await db
@@ -74,9 +71,13 @@ export class RequestService {
           })
           .onConflictDoNothing();
       } catch (err) {
-        console.warn('[@repo/api] Warning: Failed to persist blood request to DB, keeping in mockStore:', err);
+        console.error('[@repo/api] Error: Failed to persist blood request to live database:', err);
+        throw new Error('DATABASE_PERSISTENCE_FAILED');
       }
     }
+
+    // 2. Keep in-memory store in sync for fast lookup & test/mock mode
+    mockStore.createRequest(request);
 
     return request;
   }
