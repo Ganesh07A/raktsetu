@@ -40,4 +40,4 @@ export const db = dbInstance;
 export type Database = typeof db;
 export * from './schema/index';
 export * from './seed-data';
-export { eq, ne, and, or, desc, asc, sql, gt, gte, lt, lte } from 'drizzle-orm';
+export { eq, ne, and, or, desc, asc, sql, gt, gte, lt, lte, inArray } from 'drizzle-orm';

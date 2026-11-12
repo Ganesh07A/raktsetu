@@ -24,9 +24,11 @@ import {
 import { mockStore } from './mock-store';
 
 export class RequestService {
-  private isLiveDb(): boolean {
+  public isLiveDb(): boolean {
+    if (Boolean(process.env.TEST_RUNNER || process.env.BUN_TEST || process.env.NODE_ENV === 'test')) {
+      return Boolean(process.env.TEST_LIVE_DB === 'true' && process.env.DATABASE_URL);
+    }
     return Boolean(
-      process.env.NODE_ENV !== 'test' &&
       process.env.DATABASE_URL &&
       db &&
       process.env.MOCK_SERVICES !== 'true'
@@ -507,8 +509,8 @@ export class RequestService {
               longitude: donorProfiles.longitude,
             })
             .from(donorNotifications)
-            .innerJoin(donorProfiles, eq(donorNotifications.donorId, donorProfiles.id))
-            .innerJoin(users, eq(donorProfiles.userId, users.id))
+            .leftJoin(donorProfiles, eq(donorNotifications.donorId, donorProfiles.id))
+            .leftJoin(users, eq(donorProfiles.userId, users.id))
             .where(eq(donorNotifications.requestId, id));
 
           notifications = notifRows.map((n) => ({
@@ -528,12 +530,15 @@ export class RequestService {
           // Collect accepted donors
           for (const n of notifRows) {
             if (n.status === 'accepted') {
-              const dist = haversineDistance(
-                request.latitude,
-                request.longitude,
-                n.latitude,
-                n.longitude
-              );
+              const dist =
+                n.latitude != null && n.longitude != null
+                  ? haversineDistance(
+                      request.latitude,
+                      request.longitude,
+                      n.latitude,
+                      n.longitude
+                    )
+                  : 5;
               const donorName = n.donorName || 'Volunteer Donor';
               const donorPhone = n.donorPhone || '+919999999999';
 

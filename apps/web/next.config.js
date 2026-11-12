@@ -2,13 +2,24 @@ import createNextIntlPlugin from 'next-intl/plugin';
 
 const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
 
+const isProduction = process.env.NODE_ENV === 'production';
+
+// Strict production CSP vs developer-friendly local development CSP
+const scriptSrc = isProduction
+  ? `'self' 'unsafe-inline' https://www.gstatic.com`
+  : `'self' 'unsafe-eval' 'unsafe-inline' https://www.gstatic.com`;
+
+const connectSrc = isProduction
+  ? `'self' https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.bigdatacloud.net https://fcm.googleapis.com https://firebaseinstallations.googleapis.com https://*.firebaseio.com https://identitytoolkit.googleapis.com https://www.gstatic.com https://raktsetu-api-fsyx.onrender.com`
+  : `'self' https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.bigdatacloud.net https://fcm.googleapis.com https://firebaseinstallations.googleapis.com https://*.firebaseio.com https://identitytoolkit.googleapis.com https://www.gstatic.com https://raktsetu-api-fsyx.onrender.com http://localhost:3002 ws://localhost:* http://localhost:*`;
+
 const cspHeader = `
   default-src 'self';
-  script-src 'self' 'unsafe-eval' 'unsafe-inline' https://www.gstatic.com;
+  script-src ${scriptSrc};
   style-src 'self' 'unsafe-inline';
   font-src 'self' data:;
   img-src 'self' data: blob: https://*.tile.openstreetmap.org https://raw.githubusercontent.com https://unpkg.com;
-  connect-src 'self' https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.bigdatacloud.net https://fcm.googleapis.com https://firebaseinstallations.googleapis.com https://*.firebaseio.com https://identitytoolkit.googleapis.com https://www.gstatic.com https://raktsetu-api-fsyx.onrender.com http://localhost:3002 ws://localhost:* http://localhost:*;
+  connect-src ${connectSrc};
   worker-src 'self' blob: https://www.gstatic.com;
   frame-ancestors 'none';
   base-uri 'self';

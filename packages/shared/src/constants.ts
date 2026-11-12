@@ -53,6 +53,7 @@ export type RequestStatus = (typeof REQUEST_STATUSES)[number];
 
 export const NOTIFICATION_STATUSES = [
   'pending',
+  'processing',
   'sent',
   'delivered',
   'read',
@@ -60,6 +61,8 @@ export const NOTIFICATION_STATUSES = [
   'declined',
   'expired',
   'failed',
+  'exhausted',
+  'cancelled',
 ] as const;
 export type NotificationStatus = (typeof NOTIFICATION_STATUSES)[number];
 
