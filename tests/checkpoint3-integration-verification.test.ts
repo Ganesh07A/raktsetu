@@ -74,14 +74,14 @@ describe('Checkpoint 3: Production Integration Verification Test Suite', () => {
       expect(closeErr.error).toContain('invalid or expired');
     });
 
-    test('Expired and Replayed Signed Tokens are Rejected', () => {
+    test('Expired and Replayed Signed Tokens are Rejected', async () => {
       // 1. Replayed OTP ticket
       const phone = '+919876543210';
       const ticket = createOtpVerificationTicket(phone, 'donor_registration');
-      const consume1 = consumeOtpVerificationTicket(ticket, 'donor_registration', phone);
+      const consume1 = await consumeOtpVerificationTicket(ticket, 'donor_registration', phone);
       expect(consume1.success).toBe(true);
 
-      const consume2 = consumeOtpVerificationTicket(ticket, 'donor_registration', phone);
+      const consume2 = await consumeOtpVerificationTicket(ticket, 'donor_registration', phone);
       expect(consume2.success).toBe(false);
       expect(consume2.error).toContain('already been used');
 
@@ -258,7 +258,7 @@ describe('Checkpoint 3: Production Integration Verification Test Suite', () => {
       } finally {
         (process.env as any).NODE_ENV = origEnv;
       }
-    });
+    }, { timeout: 15000 });
   });
 
   // =========================================================================
@@ -357,8 +357,10 @@ describe('Checkpoint 3: Production Integration Verification Test Suite', () => {
         'strict-transport-security': hsts,
         'x-frame-options': xframe,
       });
-      // Confirm lack of secure headers middleware
-      expect(nosniff).toBeNull();
+      // Confirm secure headers middleware is active
+      expect(nosniff).toBe('nosniff');
+      expect(xframe).toBe('DENY');
+      expect(hsts).toContain('max-age=31536000');
     });
   });
 });

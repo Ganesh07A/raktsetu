@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
+import { securityStore } from './security-store';
 
 type SignedPayload = {
   purpose: 'donor-session' | 'donor-response' | 'request-close' | 'request-view' | 'otp-ticket';
@@ -130,12 +131,12 @@ export function createOtpVerificationTicket(phone: string, ticketPurpose: string
   });
 }
 
-/** Atomically verify and consume single-use verification ticket to prevent replay */
-export function consumeOtpVerificationTicket(
+/** Atomically verify and consume single-use verification ticket to prevent replay (P0.2) */
+export async function consumeOtpVerificationTicket(
   ticket: string,
   expectedPurpose: string,
   expectedPhone: string
-): { success: boolean; error?: string } {
+): Promise<{ success: boolean; error?: string }> {
   const payload = verify(ticket, 'otp-ticket');
   if (!payload || !payload.nonce || !payload.phone) {
     return { success: false, error: 'Invalid or expired phone verification ticket' };
@@ -151,11 +152,12 @@ export function consumeOtpVerificationTicket(
     return { success: false, error: 'Verification ticket phone does not match requested phone' };
   }
 
-  if (consumedTicketNonces.has(payload.nonce)) {
-    return { success: false, error: 'Verification ticket has already been used' };
-  }
-
-  consumedTicketNonces.add(payload.nonce);
-  return { success: true };
+  // Atomically consume single-use nonce via distributed shared storage (PostgreSQL / Redis)
+  return await securityStore.consumeTicketNonce(
+    payload.nonce,
+    normalizedExpected,
+    expectedPurpose,
+    payload.expiresAt
+  );
 }
 

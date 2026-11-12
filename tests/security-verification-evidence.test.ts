@@ -33,7 +33,7 @@ describe('Checkpoint Security & Verification Evidence Suite', () => {
       const testCode = otpService.getTestOtp(testPhone, 'donor_registration');
       expect(testCode).toBeDefined();
 
-      const verifyRes = otpService.verifyOtp(testPhone, testCode!, 'donor_registration');
+      const verifyRes = await otpService.verifyOtp(testPhone, testCode!, 'donor_registration');
       expect(verifyRes.success).toBe(true);
       expect(verifyRes.verificationTicket).toBeDefined();
       expect(typeof verifyRes.verificationTicket).toBe('string');
@@ -42,7 +42,7 @@ describe('Checkpoint Security & Verification Evidence Suite', () => {
     test('Scenario 2: Invalid OTP is rejected and decrements remaining attempts', async () => {
       await otpService.sendOtp(testPhone, 'donor_registration');
 
-      const verifyRes = otpService.verifyOtp(testPhone, '000000', 'donor_registration');
+      const verifyRes = await otpService.verifyOtp(testPhone, '000000', 'donor_registration');
       expect(verifyRes.success).toBe(false);
       expect(verifyRes.error).toContain('Invalid verification code');
       expect(verifyRes.remainingAttempts).toBe(4);
@@ -58,7 +58,7 @@ describe('Checkpoint Security & Verification Evidence Suite', () => {
       expect(session).toBeDefined();
       session.expiresAt = Date.now() - 1000; // expired
 
-      const verifyRes = otpService.verifyOtp(testPhone, testCode!, 'donor_registration');
+      const verifyRes = await otpService.verifyOtp(testPhone, testCode!, 'donor_registration');
       expect(verifyRes.success).toBe(false);
       expect(verifyRes.error).toContain('expired');
     });
@@ -68,11 +68,11 @@ describe('Checkpoint Security & Verification Evidence Suite', () => {
       const testCode = otpService.getTestOtp(testPhone, 'donor_registration');
 
       // First verification succeeds
-      const firstRes = otpService.verifyOtp(testPhone, testCode!, 'donor_registration');
+      const firstRes = await otpService.verifyOtp(testPhone, testCode!, 'donor_registration');
       expect(firstRes.success).toBe(true);
 
       // Immediate reuse of the same OTP must fail
-      const secondRes = otpService.verifyOtp(testPhone, testCode!, 'donor_registration');
+      const secondRes = await otpService.verifyOtp(testPhone, testCode!, 'donor_registration');
       expect(secondRes.success).toBe(false);
       expect(secondRes.error).toContain('No active OTP verification session found');
     });
@@ -82,18 +82,18 @@ describe('Checkpoint Security & Verification Evidence Suite', () => {
 
       // Attempts 1 to 4 fail with decrementing counter
       for (let i = 1; i <= 4; i++) {
-        const res = otpService.verifyOtp(testPhone, `11111${i}`, 'donor_registration');
+        const res = await otpService.verifyOtp(testPhone, `11111${i}`, 'donor_registration');
         expect(res.success).toBe(false);
         expect(res.remainingAttempts).toBe(5 - i);
       }
 
       // Attempt 5 fails and invalidates session
-      const fifthRes = otpService.verifyOtp(testPhone, '999999', 'donor_registration');
+      const fifthRes = await otpService.verifyOtp(testPhone, '999999', 'donor_registration');
       expect(fifthRes.success).toBe(false);
       expect(fifthRes.error).toContain('Maximum verification attempts exceeded');
 
       // Attempt 6: session is completely wiped
-      const sixthRes = otpService.verifyOtp(testPhone, '123456', 'donor_registration');
+      const sixthRes = await otpService.verifyOtp(testPhone, '123456', 'donor_registration');
       expect(sixthRes.success).toBe(false);
       expect(sixthRes.error).toContain('No active OTP verification session found');
     });
@@ -115,20 +115,20 @@ describe('Checkpoint Security & Verification Evidence Suite', () => {
       const testCode = otpService.getTestOtp(testPhone, 'donor_registration');
 
       // Attempt to verify the code against a different phone number
-      const wrongPhoneRes = otpService.verifyOtp(altPhone, testCode!, 'donor_registration');
+      const wrongPhoneRes = await otpService.verifyOtp(altPhone, testCode!, 'donor_registration');
       expect(wrongPhoneRes.success).toBe(false);
       expect(wrongPhoneRes.error).toContain('No active OTP verification session found');
     });
 
-    test('Scenario 8: Replayed verification ticket is rejected on second attempt', () => {
+    test('Scenario 8: Replayed verification ticket is rejected on second attempt', async () => {
       const ticket = createOtpVerificationTicket(testPhone, 'donor_registration');
 
       // First consumption succeeds
-      const firstConsume = consumeOtpVerificationTicket(ticket, 'donor_registration', testPhone);
+      const firstConsume = await consumeOtpVerificationTicket(ticket, 'donor_registration', testPhone);
       expect(firstConsume.success).toBe(true);
 
       // Replay attempt fails
-      const replayConsume = consumeOtpVerificationTicket(ticket, 'donor_registration', testPhone);
+      const replayConsume = await consumeOtpVerificationTicket(ticket, 'donor_registration', testPhone);
       expect(replayConsume.success).toBe(false);
       expect(replayConsume.error).toContain('already been used');
     });
@@ -202,7 +202,7 @@ describe('Checkpoint Security & Verification Evidence Suite', () => {
       const freshPhone = '+919871112233';
       await otpService.sendOtp(freshPhone, 'donor_registration');
       const code = otpService.getTestOtp(freshPhone, 'donor_registration');
-      const vRes = otpService.verifyOtp(freshPhone, code!, 'donor_registration');
+      const vRes = await otpService.verifyOtp(freshPhone, code!, 'donor_registration');
       const ticket = vRes.verificationTicket!;
 
       const donorPayload = {
@@ -341,8 +341,17 @@ describe('Checkpoint Security & Verification Evidence Suite', () => {
       });
       expect(acceptRes.status).toBe(200);
 
-      // 4. Poll again after acceptance: now acceptedDonors exposes contact details
-      const postAcceptRes = await app.request(`/api/v1/requests/${requestId}`);
+      // 4. Poll again after acceptance:
+      // Anonymous request receives empty acceptedDonors
+      const anonPostAccept = await app.request(`/api/v1/requests/${requestId}`);
+      expect(anonPostAccept.status).toBe(200);
+      const anonPostData = await anonPostAccept.json();
+      expect(anonPostData.acceptedDonors.length).toBe(0);
+
+      // Authorized seeker holding view capability receives unmasked contact details
+      const postAcceptRes = await app.request(`/api/v1/requests/${requestId}`, {
+        headers: { Authorization: `Bearer ${reqData.requestViewToken}` },
+      });
       expect(postAcceptRes.status).toBe(200);
       const postAcceptData = await postAcceptRes.json();
 
@@ -444,7 +453,7 @@ describe('Checkpoint Security & Verification Evidence Suite', () => {
       // Register first donor
       await otpService.sendOtp(phone, 'donor_registration');
       const code1 = otpService.getTestOtp(phone, 'donor_registration');
-      const ticket1 = otpService.verifyOtp(phone, code1!, 'donor_registration').verificationTicket!;
+      const ticket1 = (await otpService.verifyOtp(phone, code1!, 'donor_registration')).verificationTicket!;
 
       const reg1 = await app.request('/api/v1/donors/register', {
         method: 'POST',
@@ -465,7 +474,7 @@ describe('Checkpoint Security & Verification Evidence Suite', () => {
       // Attempt second donor registration with the same phone
       await otpService.sendOtp(phone, 'donor_registration');
       const code2 = otpService.getTestOtp(phone, 'donor_registration');
-      const ticket2 = otpService.verifyOtp(phone, code2!, 'donor_registration').verificationTicket!;
+      const ticket2 = (await otpService.verifyOtp(phone, code2!, 'donor_registration')).verificationTicket!;
 
       const reg2 = await app.request('/api/v1/donors/register', {
         method: 'POST',

@@ -91,7 +91,7 @@ donorRoutes.post(
       c.req.header('x-verification-ticket');
 
     if (verificationTicket) {
-      const ticketResult = consumeOtpVerificationTicket(
+      const ticketResult = await consumeOtpVerificationTicket(
         verificationTicket,
         'donor_registration',
         normalizedPhone

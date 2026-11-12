@@ -624,9 +624,16 @@ export function RequestWizard() {
       }
 
       setCreatedRequestId(requestId);
+      if (typeof window !== 'undefined') {
+        if (typeof data.requestViewToken === 'string') {
+          sessionStorage.setItem(`raktkhoj_view_token_${requestId}`, data.requestViewToken);
+        }
+        if (typeof data.requestCloseToken === 'string') {
+          sessionStorage.setItem(`raktkhoj_close_token_${requestId}`, data.requestCloseToken);
+        }
+      }
       setRequestCloseToken(typeof data.requestCloseToken === 'string' ? data.requestCloseToken : null);
-      const closeQuery = typeof data.requestCloseToken === 'string' ? `?closeToken=${encodeURIComponent(data.requestCloseToken)}` : '';
-      router.push(`/request/${requestId}${closeQuery}`);
+      router.push(`/request/${requestId}`);
     } catch (error) {
       setRequestError(error instanceof Error ? error.message : 'Unable to send emergency request.');
       goToStep('STEP_6_SEND_REQUEST');

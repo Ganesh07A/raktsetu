@@ -1,5 +1,6 @@
 import { randomInt, createHmac, timingSafeEqual } from 'node:crypto';
 import { createOtpVerificationTicket } from './donor-session';
+import { securityStore } from './security-store';
 
 export interface OtpSession {
   phone: string;
@@ -39,9 +40,12 @@ export class ProductionSmsProvider implements OtpProvider {
 }
 
 export class OtpService {
-  private sessions = new Map<string, OtpSession>();
   private testOtps = new Map<string, string>(); // Only used in test environment
   private provider: OtpProvider;
+
+  public get sessions(): Map<string, any> {
+    return (securityStore as any).memoryOtpSessions;
+  }
 
   constructor(provider?: OtpProvider) {
     if (provider) {
@@ -68,7 +72,7 @@ export class OtpService {
     purpose: string = 'donor_registration'
   ): Promise<{ success: boolean; message: string; cooldownSeconds?: number; error?: string }> {
     const key = this.sessionKey(phone, purpose);
-    const existing = this.sessions.get(key);
+    const existing = await securityStore.getOtpSession(phone, purpose);
     const now = Date.now();
 
     // Check resend cooldown (60 seconds)
@@ -96,14 +100,14 @@ export class OtpService {
       lastSentAt: now,
     };
 
-    this.sessions.set(key, session);
+    await securityStore.saveOtpSession(session);
     if (process.env.NODE_ENV === 'test') {
       this.testOtps.set(key, otp);
     }
 
     const sendRes = await this.provider.sendOtp(phone, otp, purpose);
     if (!sendRes.success) {
-      this.sessions.delete(key);
+      await securityStore.deleteOtpSession(phone, purpose);
       return {
         success: false,
         message: sendRes.error || 'Failed to dispatch verification code',
@@ -117,13 +121,13 @@ export class OtpService {
     };
   }
 
-  public verifyOtp(
+  public async verifyOtp(
     phone: string,
     otp: string,
     purpose: string = 'donor_registration'
-  ): { success: boolean; verificationTicket?: string; error?: string; remainingAttempts?: number } {
+  ): Promise<{ success: boolean; verificationTicket?: string; error?: string; remainingAttempts?: number }> {
     const key = this.sessionKey(phone, purpose);
-    const session = this.sessions.get(key);
+    const session = await securityStore.getOtpSession(phone, purpose);
     const now = Date.now();
 
     if (!session) {
@@ -134,7 +138,7 @@ export class OtpService {
     }
 
     if (now > session.expiresAt) {
-      this.sessions.delete(key);
+      await securityStore.deleteOtpSession(phone, purpose);
       return {
         success: false,
         error: 'Verification code has expired. Please request a new code.',
@@ -142,7 +146,7 @@ export class OtpService {
     }
 
     if (session.attempts >= session.maxAttempts) {
-      this.sessions.delete(key);
+      await securityStore.deleteOtpSession(phone, purpose);
       return {
         success: false,
         error: 'Maximum verification attempts exceeded. Please request a new code.',
@@ -162,13 +166,14 @@ export class OtpService {
     if (!isMatch) {
       const remaining = session.maxAttempts - session.attempts;
       if (remaining <= 0) {
-        this.sessions.delete(key);
+        await securityStore.deleteOtpSession(phone, purpose);
         return {
           success: false,
           error: 'Maximum verification attempts exceeded. Session invalidated.',
           remainingAttempts: 0,
         };
       }
+      await securityStore.saveOtpSession(session);
       return {
         success: false,
         error: `Invalid verification code. ${remaining} attempts remaining.`,
@@ -177,7 +182,7 @@ export class OtpService {
     }
 
     // Successfully verified: clear OTP session and issue signed verification ticket
-    this.sessions.delete(key);
+    await securityStore.deleteOtpSession(phone, purpose);
     if (process.env.NODE_ENV === 'test') {
       this.testOtps.delete(key);
     }
@@ -196,6 +201,7 @@ export class OtpService {
   }
 
   public clear(): void {
+    securityStore.clear();
     this.sessions.clear();
     this.testOtps.clear();
   }

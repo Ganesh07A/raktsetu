@@ -100,7 +100,7 @@ authRoutes.post('/otp/verify', otpVerifyRateLimit, async (c) => {
   }
 
   const { phone, otp, purpose } = parseResult.data;
-  const result = otpService.verifyOtp(phone, otp, purpose);
+  const result = await otpService.verifyOtp(phone, otp, purpose);
 
   if (!result.success) {
     return c.json(

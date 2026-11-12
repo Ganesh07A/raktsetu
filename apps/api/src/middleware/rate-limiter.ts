@@ -1,4 +1,5 @@
 import type { Context, MiddlewareHandler } from 'hono';
+import { securityStore } from '../services/security-store';
 
 export interface RateLimitOptions {
   windowMs: number;
@@ -76,7 +77,15 @@ export function rateLimiter(options: RateLimitOptions, store: MemoryRateLimitSto
     }
 
     const key = await keyGenerator(c);
-    const result = store.increment(key, windowMs);
+    let result: { count: number; resetAt: number };
+    try {
+      result = await securityStore.incrementRateLimit(key, windowMs);
+    } catch {
+      if (process.env.NODE_ENV === 'production') {
+        return c.json({ error: 'Service rate limiter temporarily unavailable' }, 503);
+      }
+      result = store.increment(key, windowMs);
+    }
     const now = Date.now();
     const resetSeconds = Math.max(1, Math.ceil((result.resetAt - now) / 1000));
 

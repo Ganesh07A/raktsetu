@@ -168,7 +168,7 @@ describe('API Server Endpoints', () => {
         searchRadiusKm: 10,
       }),
     });
-    const created = (await createRes.json()) as { request: { id: string } };
+    const created = (await createRes.json()) as { request: { id: string }; requestViewToken?: string };
     const requestId = created.request.id;
 
     // 2. Respond through the signed push-response token (the legacy client-supplied donorId route is removed)
@@ -183,8 +183,10 @@ describe('API Server Endpoints', () => {
     });
     expect(respondRes.status).toBe(200);
 
-    // 3. Check waiting room state
-    const waitingRes = await app.request(`/api/v1/requests/${requestId}`);
+    // 3. Check waiting room state with authorized request view token
+    const waitingRes = await app.request(`/api/v1/requests/${requestId}`, {
+      headers: { Authorization: `Bearer ${created.requestViewToken}` },
+    });
     expect(waitingRes.status).toBe(200);
 
     const waitingBody = (await waitingRes.json()) as {

@@ -23,20 +23,9 @@ import { eraktkoshProxy } from '../services/eraktkosh-proxy';
 import { requestService } from '../services/request-service';
 import { notificationOutbox } from '../services/notification-outbox';
 import { rateLimiter, getClientIp } from '../middleware/rate-limiter';
+import { securityStore } from '../services/security-store';
 
 export const requestRoutes = new Hono();
-
-// Idempotency cache to prevent duplicate request creation and duplicate fan-out (C-02)
-const idempotencyStore = new Map<string, { response: any; createdAt: number }>();
-
-function cleanupIdempotencyStore(): void {
-  const now = Date.now();
-  for (const [key, val] of idempotencyStore.entries()) {
-    if (now - val.createdAt > 10 * 60 * 1000) {
-      idempotencyStore.delete(key);
-    }
-  }
-}
 
 // Rate limiter for emergency request creation: 10/hr per IP, 3/hr per phone (C-02, H-06)
 const requestCreationRateLimiter = rateLimiter({
@@ -47,13 +36,13 @@ const requestCreationRateLimiter = rateLimiter({
 
 // POST /api/v1/requests - Create an emergency blood request
 requestRoutes.post('/', requestCreationRateLimiter, async (c) => {
-  cleanupIdempotencyStore();
-
   const idempotencyKey =
     c.req.header('idempotency-key') || c.req.header('x-idempotency-key');
-  if (idempotencyKey && idempotencyStore.has(idempotencyKey)) {
-    const cached = idempotencyStore.get(idempotencyKey)!;
-    return c.json(cached.response, 201);
+  if (idempotencyKey) {
+    const cachedResponse = await securityStore.getIdempotency(idempotencyKey);
+    if (cachedResponse) {
+      return c.json(cachedResponse, 201);
+    }
   }
 
   let body: any;
@@ -104,7 +93,7 @@ requestRoutes.post('/', requestCreationRateLimiter, async (c) => {
     c.req.header('x-verification-ticket');
 
   if (requesterPhone && verificationTicket) {
-    const ticketCheck = consumeOtpVerificationTicket(
+    const ticketCheck = await consumeOtpVerificationTicket(
       verificationTicket,
       'emergency_request',
       requesterPhone
@@ -236,16 +225,18 @@ requestRoutes.post('/', requestCreationRateLimiter, async (c) => {
   };
 
   if (idempotencyKey) {
-    idempotencyStore.set(idempotencyKey, {
-      response: responsePayload,
-      createdAt: Date.now(),
-    });
+    await securityStore.saveIdempotency(
+      idempotencyKey,
+      responsePayload,
+      body.requesterId || null,
+      'create_blood_request'
+    );
   }
 
   return c.json(responsePayload, 201);
 });
 
-// GET /api/v1/requests/:id - Get request details, status, & waiting room state (H-05)
+// GET /api/v1/requests/:id - Get request details, status, & waiting room state (H-05, P0.1)
 requestRoutes.get('/:id', async (c) => {
   const { id } = c.req.param();
   const details = await requestService.getRequestWithDetails(id);
@@ -257,11 +248,11 @@ requestRoutes.get('/:id', async (c) => {
     );
   }
 
-  // Capability authorization check (H-05)
+  // Capability authorization check (H-05, P0.1)
   const authHeader = c.req.header('Authorization') || '';
   const token = authHeader.startsWith('Bearer ')
-    ? authHeader.slice(7)
-    : c.req.query('token') || '';
+    ? authHeader.slice(7).trim()
+    : c.req.query('token') || c.req.header('x-view-token') || '';
 
   // Reject close tokens when used as read tokens (H-05)
   if (token && verifyRequestCloseToken(token)) {
@@ -271,9 +262,28 @@ requestRoutes.get('/:id', async (c) => {
     );
   }
 
-  // Redact exact coordinates from public outputs (C-03, H-05)
-  const safeLatitude = Math.round(details.request.latitude * 100) / 100;
-  const safeLongitude = Math.round(details.request.longitude * 100) / 100;
+  // 1. Verify cryptographic signature server-side
+  // 2. Verify that token belongs to THIS EXACT request ID
+  // 3. Enforce token expiration
+  const viewPayload = token ? verifyRequestViewToken(token) : null;
+  const isAuthorizedRequester = Boolean(viewPayload && viewPayload.requestId === id);
+
+  // 4. Ensure cancelled, expired, and terminal requests cannot disclose accepted donor contacts
+  const status = details.request.status as string;
+  const isTerminalOrInactive = status === 'cancelled' || status === 'expired' || status === 'closed';
+
+  // Only authorized requesters holding a valid view capability for this active request receive donor contacts
+  const safeAcceptedDonors = (isAuthorizedRequester && !isTerminalOrInactive)
+    ? details.acceptedDonors
+    : [];
+
+  // Redact exact coordinates from public/anonymous outputs (fuzz to ~1.1km if unauthorized)
+  const safeLatitude = isAuthorizedRequester
+    ? details.request.latitude
+    : Math.round(details.request.latitude * 100) / 100;
+  const safeLongitude = isAuthorizedRequester
+    ? details.request.longitude
+    : Math.round(details.request.longitude * 100) / 100;
 
   const safeRequest = {
     ...details.request,
@@ -290,7 +300,7 @@ requestRoutes.get('/:id', async (c) => {
       sentAt: notification.sentAt,
       respondedAt: notification.respondedAt,
     })),
-    acceptedDonors: details.acceptedDonors,
+    acceptedDonors: safeAcceptedDonors,
   });
 });
 

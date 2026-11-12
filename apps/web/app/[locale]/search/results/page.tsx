@@ -207,10 +207,15 @@ export default function SearchResultsPage() {
 
       const data = await res.json();
       if (data.request?.id) {
-        const closeToken = typeof data.requestCloseToken === 'string'
-          ? `?closeToken=${encodeURIComponent(data.requestCloseToken)}`
-          : '';
-        router.push(`/request/${data.request.id}${closeToken}`);
+        if (typeof window !== 'undefined') {
+          if (typeof data.requestViewToken === 'string') {
+            sessionStorage.setItem(`raktkhoj_view_token_${data.request.id}`, data.requestViewToken);
+          }
+          if (typeof data.requestCloseToken === 'string') {
+            sessionStorage.setItem(`raktkhoj_close_token_${data.request.id}`, data.requestCloseToken);
+          }
+        }
+        router.push(`/request/${data.request.id}`);
         return;
       }
       throw new Error('The API did not return a request ID.');

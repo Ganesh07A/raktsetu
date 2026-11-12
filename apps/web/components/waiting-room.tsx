@@ -144,15 +144,21 @@ export function WaitingRoom({ requestId, requestCloseToken, requestViewToken, in
   );
   const allFailed = notifications.length > 0 && notifications.every((item) => item.status === 'failed');
 
+  const effectiveCloseToken =
+    requestCloseToken ||
+    (typeof window !== 'undefined'
+      ? sessionStorage.getItem(`raktkhoj_close_token_${requestId}`)
+      : null);
+
   const handleCloseSearch = async () => {
-    if (!requestCloseToken || closing || isFulfilled || isClosed) return;
+    if (!effectiveCloseToken || closing || isFulfilled || isClosed) return;
     setClosing(true);
     setCloseError(null);
     try {
       const response = await fetch(`${API_BASE}/api/v1/requests/${encodeURIComponent(requestId)}/close`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestCloseToken }),
+        body: JSON.stringify({ requestCloseToken: effectiveCloseToken }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Unable to close this search.');
@@ -429,7 +435,7 @@ export function WaitingRoom({ requestId, requestCloseToken, requestViewToken, in
         </CardContent>
       </Card>
 
-      {!isFulfilled && !hasBankStock && !isClosed && requestCloseToken && (
+      {!isFulfilled && !hasBankStock && !isClosed && effectiveCloseToken && (
         <div className="space-y-2">
           <Button
             type="button"
