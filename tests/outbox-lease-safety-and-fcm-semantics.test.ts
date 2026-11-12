@@ -245,7 +245,9 @@ describe('Checkpoint 4.3: Strict Worker Lease Fencing & FCM Delivery Semantics',
     expect(finalRow.leaseToken).toBeNull(); // Cleared upon terminal state
   }, 25000);
 
-  test('5. Bounded FCM request timeout aborts slow network call safely', async () => {
+  test('5. Bounded FCM request timeout: client-side deadline enforces bounded waiting without hanging worker', async () => {
+    // Guarantee: Bounded waiting via Promise.race prevents worker starvation and hung locks.
+    // Does NOT perform network-level socket cancellation as Firebase Admin SDK lacks AbortSignal support.
     const origEnv = process.env.FCM_TIMEOUT_MS;
     process.env.FCM_TIMEOUT_MS = '50'; // short timeout for testing
 
