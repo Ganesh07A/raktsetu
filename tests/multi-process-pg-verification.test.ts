@@ -131,7 +131,7 @@ describe('Checkpoint 4.2: Genuine Multi-Process PostgreSQL Verification Suite', 
         status: 'pending',
         attempts: 0,
         maxAttempts: 3,
-        nextRetryAt: new Date(Date.now() - 5000),
+        nextRetryAt: new Date(Date.now() - 60000),
       },
       {
         id: notifB,
@@ -140,7 +140,7 @@ describe('Checkpoint 4.2: Genuine Multi-Process PostgreSQL Verification Suite', 
         status: 'pending',
         attempts: 0,
         maxAttempts: 3,
-        nextRetryAt: new Date(Date.now() - 5000),
+        nextRetryAt: new Date(Date.now() - 60000),
       },
     ]);
 
@@ -175,7 +175,7 @@ describe('Checkpoint 4.2: Genuine Multi-Process PostgreSQL Verification Suite', 
         status: 'pending',
         attempts: 0,
         maxAttempts: 3,
-        nextRetryAt: new Date(Date.now() - 5000),
+        nextRetryAt: new Date(Date.now() - 60000),
       },
     ]);
 

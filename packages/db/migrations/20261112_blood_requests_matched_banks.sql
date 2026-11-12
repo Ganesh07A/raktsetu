@@ -9,3 +9,4 @@ ALTER TABLE blood_requests
   ADD COLUMN IF NOT EXISTS matched_bank_distance_km DOUBLE PRECISION,
   ADD COLUMN IF NOT EXISTS matched_bank_provenance TEXT,
   ADD COLUMN IF NOT EXISTS matched_bank_verification_status TEXT;
+

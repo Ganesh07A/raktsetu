@@ -74,3 +74,4 @@ describe('Checkpoint 4.2: Content Security Policy (CSP) Production Review', () =
     }
   });
 });
+

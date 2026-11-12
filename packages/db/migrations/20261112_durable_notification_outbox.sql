@@ -13,3 +13,4 @@ ALTER TABLE donor_notifications
 CREATE INDEX IF NOT EXISTS notifications_outbox_queue_idx
   ON donor_notifications (status, next_retry_at)
   WHERE status IN ('pending', 'processing');
+

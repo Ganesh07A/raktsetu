@@ -129,7 +129,17 @@ export class PushNotificationService {
       }));
 
       try {
-        const result = await messaging.sendEach(messages);
+        const timeoutMs = Number(process.env.FCM_TIMEOUT_MS || 15000);
+        let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(
+            () => reject(new Error(`FCM batch send timed out after ${timeoutMs}ms`)),
+            timeoutMs
+          );
+        });
+
+        const result = await Promise.race([messaging.sendEach(messages), timeoutPromise]);
+        if (timeoutHandle) clearTimeout(timeoutHandle);
         result.responses.forEach((response, index) => {
           if (response.success) {
             successCount += 1;

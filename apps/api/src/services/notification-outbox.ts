@@ -133,7 +133,7 @@ export class NotificationOutboxService {
       const reqDetails = await requestService.getRequestWithDetails(item.requestId);
       const req = reqDetails?.request;
       if (req && (req.status === 'cancelled' || req.status === 'expired' || req.status === 'fulfilled')) {
-        await this.markTerminal(notifId, item.requestId, donor.id, req.status);
+        await this.markTerminal(notifId, item.requestId, donor.id, req.status, this.currentWorkerId);
         cancelledCount++;
         continue;
       }
@@ -142,7 +142,7 @@ export class NotificationOutboxService {
       const deviceTokens = await requestService.getPushTokensForDonor(donor.id);
 
       if (deviceTokens.length === 0) {
-        await this.markFailed(notifId, item.requestId, donor.id, 'No push tokens registered');
+        await this.markFailed(notifId, item.requestId, donor.id, 'No push tokens registered', this.currentWorkerId);
         failedCount++;
         continue;
       }
@@ -182,15 +182,15 @@ export class NotificationOutboxService {
       }
 
       if (success) {
-        sentCount++;
-        await this.markSent(notifId, item.requestId, donor.id, lastResult?.messageId ?? null);
+        const ok = await this.markSent(notifId, item.requestId, donor.id, lastResult?.messageId ?? null, this.currentWorkerId);
+        if (ok) sentCount++;
       } else {
         if (attempt >= 3) {
-          exhaustedCount++;
-          await this.markExhausted(notifId, item.requestId, donor.id, lastError);
+          const ok = await this.markExhausted(notifId, item.requestId, donor.id, lastError, this.currentWorkerId);
+          if (ok) exhaustedCount++;
         } else {
-          failedCount++;
-          await this.markRetry(notifId, item.requestId, donor.id, 5, lastError);
+          const ok = await this.markRetry(notifId, item.requestId, donor.id, 5, lastError, this.currentWorkerId);
+          if (ok) failedCount++;
         }
       }
 
@@ -319,7 +319,7 @@ export class NotificationOutboxService {
 
       if (!req || req.status === 'cancelled' || req.status === 'expired' || req.status === 'fulfilled') {
         const terminalReason = req ? req.status : 'not_found';
-        await this.markTerminal(item.id, item.requestId, item.donorId, terminalReason);
+        await this.markTerminal(item.id, item.requestId, item.donorId, terminalReason, workerId);
         cancelledCount++;
         continue;
       }
@@ -328,7 +328,7 @@ export class NotificationOutboxService {
       const deviceTokens = await requestService.getPushTokensForDonor(item.donorId);
       if (deviceTokens.length === 0) {
         // No registered device tokens
-        await this.markFailed(item.id, item.requestId, item.donorId, 'No push tokens registered');
+        await this.markFailed(item.id, item.requestId, item.donorId, 'No push tokens registered', workerId);
         failedCount++;
         continue;
       }
@@ -359,16 +359,16 @@ export class NotificationOutboxService {
       }
 
       if (dispatchSuccess) {
-        sentCount++;
-        await this.markSent(item.id, item.requestId, item.donorId, lastResult?.messageId ?? null);
+        const ok = await this.markSent(item.id, item.requestId, item.donorId, lastResult?.messageId ?? null, workerId);
+        if (ok) sentCount++;
       } else {
         if (item.attempts >= item.maxAttempts) {
-          exhaustedCount++;
-          await this.markExhausted(item.id, item.requestId, item.donorId, dispatchError);
+          const ok = await this.markExhausted(item.id, item.requestId, item.donorId, dispatchError, workerId);
+          if (ok) exhaustedCount++;
         } else {
-          failedCount++;
           const backoffSeconds = Math.min(300, Math.pow(2, item.attempts) * 2);
-          await this.markRetry(item.id, item.requestId, item.donorId, backoffSeconds, dispatchError);
+          const ok = await this.markRetry(item.id, item.requestId, item.donorId, backoffSeconds, dispatchError, workerId);
+          if (ok) failedCount++;
         }
       }
 
@@ -476,33 +476,62 @@ export class NotificationOutboxService {
     }
   }
 
+  /**
+   * Renew worker lease on an actively processing notification.
+   */
+  public async renewLease(
+    id: string,
+    workerId: string = this.currentWorkerId
+  ): Promise<boolean> {
+    if (!this.isLiveDb()) return true;
+    try {
+      const rows = await db.execute(sql`
+        UPDATE donor_notifications
+        SET locked_at = NOW()
+        WHERE id = ${id} AND locked_by = ${workerId}
+        RETURNING id;
+      `);
+      return Boolean(rows && rows.length > 0);
+    } catch {
+      return false;
+    }
+  }
+
   private async markTerminal(
     id: string,
     requestId: string,
     donorId: string,
-    terminalStatus: string
-  ): Promise<void> {
+    terminalStatus: string,
+    workerId: string = this.currentWorkerId
+  ): Promise<boolean> {
     if (this.isLiveDb()) {
-      await db.execute(sql`
+      const rows = await db.execute(sql`
         UPDATE donor_notifications
         SET status = 'cancelled',
             locked_by = NULL,
             locked_at = NULL,
             error_details = ${'Terminal request state: ' + terminalStatus}
-        WHERE id = ${id};
+        WHERE id = ${id} AND (locked_by = ${workerId} OR locked_by IS NULL)
+        RETURNING id;
       `);
+      if (!rows || rows.length === 0) {
+        console.warn(`[@repo/api] Stale lease: worker ${workerId} lost lock for notification ${id}. Update discarded.`);
+        return false;
+      }
     }
     mockStore.setNotificationDelivery(requestId, donorId, 'cancelled');
+    return true;
   }
 
   private async markSent(
     id: string,
     requestId: string,
     donorId: string,
-    pushMessageId: string | null
-  ): Promise<void> {
+    pushMessageId: string | null,
+    workerId: string = this.currentWorkerId
+  ): Promise<boolean> {
     if (this.isLiveDb()) {
-      await db.execute(sql`
+      const rows = await db.execute(sql`
         UPDATE donor_notifications
         SET status = 'sent',
             push_message_id = ${pushMessageId},
@@ -510,48 +539,62 @@ export class NotificationOutboxService {
             locked_by = NULL,
             locked_at = NULL,
             error_details = NULL
-        WHERE id = ${id};
+        WHERE id = ${id} AND (locked_by = ${workerId} OR locked_by IS NULL)
+        RETURNING id;
       `);
+      if (!rows || rows.length === 0) {
+        console.warn(`[@repo/api] Stale lease: worker ${workerId} lost lock for notification ${id}. Overwrite prevented.`);
+        return false;
+      }
     }
     mockStore.setNotificationDelivery(requestId, donorId, 'sent');
+    return true;
   }
 
   private async markFailed(
     id: string,
     requestId: string,
     donorId: string,
-    error: string | null
-  ): Promise<void> {
+    error: string | null,
+    workerId: string = this.currentWorkerId
+  ): Promise<boolean> {
     if (this.isLiveDb()) {
-      await db.execute(sql`
+      const rows = await db.execute(sql`
         UPDATE donor_notifications
         SET status = 'failed',
             locked_by = NULL,
             locked_at = NULL,
             error_details = ${error}
-        WHERE id = ${id};
+        WHERE id = ${id} AND (locked_by = ${workerId} OR locked_by IS NULL)
+        RETURNING id;
       `);
+      if (!rows || rows.length === 0) return false;
     }
     mockStore.setNotificationDelivery(requestId, donorId, 'failed');
+    return true;
   }
 
   private async markExhausted(
     id: string,
     requestId: string,
     donorId: string,
-    error: string | null
-  ): Promise<void> {
+    error: string | null,
+    workerId: string = this.currentWorkerId
+  ): Promise<boolean> {
     if (this.isLiveDb()) {
-      await db.execute(sql`
+      const rows = await db.execute(sql`
         UPDATE donor_notifications
         SET status = 'exhausted',
             locked_by = NULL,
             locked_at = NULL,
             error_details = ${error}
-        WHERE id = ${id};
+        WHERE id = ${id} AND (locked_by = ${workerId} OR locked_by IS NULL)
+        RETURNING id;
       `);
+      if (!rows || rows.length === 0) return false;
     }
     mockStore.setNotificationDelivery(requestId, donorId, 'exhausted');
+    return true;
   }
 
   private async markRetry(
@@ -559,20 +602,24 @@ export class NotificationOutboxService {
     requestId: string,
     donorId: string,
     backoffSeconds: number,
-    error: string | null
-  ): Promise<void> {
+    error: string | null,
+    workerId: string = this.currentWorkerId
+  ): Promise<boolean> {
     if (this.isLiveDb()) {
-      await db.execute(sql`
+      const rows = await db.execute(sql`
         UPDATE donor_notifications
         SET status = 'pending',
             next_retry_at = NOW() + (${backoffSeconds} * INTERVAL '1 second'),
             locked_by = NULL,
             locked_at = NULL,
             error_details = ${error}
-        WHERE id = ${id};
+        WHERE id = ${id} AND (locked_by = ${workerId} OR locked_by IS NULL)
+        RETURNING id;
       `);
+      if (!rows || rows.length === 0) return false;
     }
     mockStore.setNotificationDelivery(requestId, donorId, 'pending');
+    return true;
   }
 }
 

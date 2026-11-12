@@ -8,6 +8,7 @@ import { pushRoutes } from './routes/push';
 import { authRoutes } from './routes/auth';
 import { healthRoutes, readyRoutes } from './routes/health';
 import { logConfigProblems } from './lib/config';
+import { notificationOutbox } from './services/notification-outbox';
 
 const app = new Hono();
 logConfigProblems();
@@ -81,6 +82,12 @@ app.route('/api/v1/push', pushRoutes);
 app.route('/api/v1/auth', authRoutes);
 
 const port = Number(process.env.PORT || process.env.API_PORT || 3002);
+
+if (process.env.NODE_ENV !== 'test' && process.env.OUTBOX_WORKER_ENABLED !== 'false') {
+  const pollInterval = Number(process.env.OUTBOX_POLL_INTERVAL_MS || 5000);
+  console.log(`[@repo/api] Initializing outbox background worker (polling every ${pollInterval}ms)...`);
+  notificationOutbox.startWorker(undefined, pollInterval);
+}
 
 export default { port, fetch: app.fetch };
 export { app };
