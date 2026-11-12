@@ -67,3 +67,4 @@ export type ConsumedTicketNonceRow = typeof consumedTicketNonces.$inferSelect;
 export type NewConsumedTicketNonceRow = typeof consumedTicketNonces.$inferInsert;
 export type RateLimitCounterRow = typeof rateLimitCounters.$inferSelect;
 export type NewRateLimitCounterRow = typeof rateLimitCounters.$inferInsert;
+

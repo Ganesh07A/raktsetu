@@ -7,6 +7,7 @@ import {
   eq,
   and,
   gt,
+  lt,
   sql,
 } from '@repo/db';
 
@@ -27,7 +28,7 @@ const IS_TEST_RUNNER =
   process.argv.some((a) => a.includes('test'));
 
 export class SecurityStore {
-  // In-memory fallbacks for unit tests & offline environments
+  // In-memory fallbacks for unit tests & offline environments ONLY
   private memoryRateLimits = new Map<string, { count: number; resetAt: number }>();
   private memoryIdempotency = new Map<string, { response: any; createdAt: number; expiresAt: number }>();
   private memoryOtpSessions = new Map<string, StoredOtpSession>();
@@ -36,6 +37,15 @@ export class SecurityStore {
   public isLiveDb(): boolean {
     if (IS_TEST_RUNNER) {
       return Boolean(process.env.TEST_LIVE_DB === 'true' && process.env.DATABASE_URL);
+    }
+    if (process.env.NODE_ENV === 'production') {
+      if (process.env.DISABLE_DB_SECURITY === 'true') {
+        throw new Error('SECURITY_VIOLATION: DISABLE_DB_SECURITY is strictly prohibited in production.');
+      }
+      if (!process.env.DATABASE_URL) {
+        throw new Error('FATAL: DATABASE_URL is required in production.');
+      }
+      return true;
     }
     return Boolean(
       process.env.NODE_ENV !== 'test' &&
@@ -68,7 +78,7 @@ export class SecurityStore {
             target: rateLimitCounters.key,
             set: {
               points: sql`CASE WHEN rate_limit_counters.reset_at < NOW() THEN 1 ELSE rate_limit_counters.points + 1 END`,
-              resetAt: sql`CASE WHEN rate_limit_counters.reset_at < NOW() THEN ${resetDate} ELSE rate_limit_counters.reset_at END`,
+              resetAt: sql`CASE WHEN rate_limit_counters.reset_at < NOW() THEN NOW() + (${windowMs} * INTERVAL '1 millisecond') ELSE rate_limit_counters.reset_at END`,
             },
           })
           .returning();
@@ -82,14 +92,17 @@ export class SecurityStore {
         }
       } catch (err) {
         console.error('[@repo/api] Shared rate limit database operation failed:', err);
-        // In production, fail-closed for sensitive security thresholds
         if (process.env.NODE_ENV === 'production') {
           throw new Error('SHARED_RATE_LIMITER_UNAVAILABLE');
         }
       }
     }
 
-    // In-memory fallback
+    if (process.env.NODE_ENV === 'production' && !IS_TEST_RUNNER) {
+      throw new Error('SHARED_RATE_LIMITER_UNAVAILABLE');
+    }
+
+    // In-memory fallback (dev & test environments only)
     const existing = this.memoryRateLimits.get(key);
     if (!existing || now >= existing.resetAt) {
       const record = { count: 1, resetAt: now + windowMs };
@@ -124,6 +137,10 @@ export class SecurityStore {
           throw new Error('SHARED_IDEMPOTENCY_STORE_UNAVAILABLE');
         }
       }
+    }
+
+    if (process.env.NODE_ENV === 'production' && !IS_TEST_RUNNER) {
+      throw new Error('SHARED_IDEMPOTENCY_STORE_UNAVAILABLE');
     }
 
     const cached = this.memoryIdempotency.get(key);
@@ -162,6 +179,10 @@ export class SecurityStore {
           throw new Error('SHARED_IDEMPOTENCY_STORE_UNAVAILABLE');
         }
       }
+    }
+
+    if (process.env.NODE_ENV === 'production' && !IS_TEST_RUNNER) {
+      throw new Error('SHARED_IDEMPOTENCY_STORE_UNAVAILABLE');
     }
 
     this.memoryIdempotency.set(key, {
@@ -206,6 +227,10 @@ export class SecurityStore {
       }
     }
 
+    if (process.env.NODE_ENV === 'production' && !IS_TEST_RUNNER) {
+      throw new Error('SHARED_OTP_STORE_UNAVAILABLE');
+    }
+
     return this.memoryOtpSessions.get(key) || null;
   }
 
@@ -245,6 +270,10 @@ export class SecurityStore {
       }
     }
 
+    if (process.env.NODE_ENV === 'production' && !IS_TEST_RUNNER) {
+      throw new Error('SHARED_OTP_STORE_UNAVAILABLE');
+    }
+
     this.memoryOtpSessions.set(key, session);
   }
 
@@ -259,6 +288,9 @@ export class SecurityStore {
           .where(and(eq(otpSessions.phone, normPhone), eq(otpSessions.purpose, purpose)));
       } catch (err) {
         console.error('[@repo/api] Shared OTP session delete failed:', err);
+        if (process.env.NODE_ENV === 'production') {
+          throw new Error('SHARED_OTP_STORE_UNAVAILABLE');
+        }
       }
     }
 
@@ -301,11 +333,76 @@ export class SecurityStore {
       }
     }
 
+    if (process.env.NODE_ENV === 'production' && !IS_TEST_RUNNER) {
+      return { success: false, error: 'Database service unavailable during ticket verification' };
+    }
+
     if (this.memoryConsumedNonces.has(nonce)) {
       return { success: false, error: 'Verification ticket has already been used' };
     }
     this.memoryConsumedNonces.add(nonce);
     return { success: true };
+  }
+
+  // ==========================================
+  // 5. MAINTENANCE & EXPIRED RECORD CLEANUP
+  // ==========================================
+  public async cleanupExpiredRecords(): Promise<{
+    expiredRateLimits: number;
+    expiredIdempotency: number;
+    expiredOtpSessions: number;
+    expiredTicketNonces: number;
+  }> {
+    const now = new Date();
+    let rateLimitsCleaned = 0;
+    let idempotencyCleaned = 0;
+    let otpCleaned = 0;
+    let noncesCleaned = 0;
+
+    if (this.isLiveDb()) {
+      try {
+        const r1 = await db.delete(rateLimitCounters).where(lt(rateLimitCounters.resetAt, now));
+        rateLimitsCleaned = (r1 as any)?.count ?? 0;
+
+        const r2 = await db.delete(idempotencyKeys).where(lt(idempotencyKeys.expiresAt, now));
+        idempotencyCleaned = (r2 as any)?.count ?? 0;
+
+        const r3 = await db.delete(otpSessions).where(lt(otpSessions.expiresAt, now));
+        otpCleaned = (r3 as any)?.count ?? 0;
+
+        const r4 = await db.delete(consumedTicketNonces).where(lt(consumedTicketNonces.expiresAt, now));
+        noncesCleaned = (r4 as any)?.count ?? 0;
+      } catch (err) {
+        console.error('[@repo/api] Expired security record cleanup failed:', err);
+      }
+    } else {
+      const nowMs = now.getTime();
+      for (const [k, v] of this.memoryRateLimits) {
+        if (v.resetAt < nowMs) {
+          this.memoryRateLimits.delete(k);
+          rateLimitsCleaned++;
+        }
+      }
+      for (const [k, v] of this.memoryIdempotency) {
+        if (v.expiresAt < nowMs) {
+          this.memoryIdempotency.delete(k);
+          idempotencyCleaned++;
+        }
+      }
+      for (const [k, v] of this.memoryOtpSessions) {
+        if (v.expiresAt < nowMs) {
+          this.memoryOtpSessions.delete(k);
+          otpCleaned++;
+        }
+      }
+    }
+
+    return {
+      expiredRateLimits: rateLimitsCleaned,
+      expiredIdempotency: idempotencyCleaned,
+      expiredOtpSessions: otpCleaned,
+      expiredTicketNonces: noncesCleaned,
+    };
   }
 
   // ==========================================

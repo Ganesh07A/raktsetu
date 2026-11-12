@@ -14,18 +14,14 @@ Initiate this rollback procedure immediately if any of the following critical co
 
 ---
 
-## 2. Emergency Kill-Switches (Zero-Downtime Fallback)
+## 2. Security Invariants & Prohibited Fallbacks
 
-Before initiating a full rollback, consider the non-destructive kill-switch flags:
-
-### 2.1 Disable Database Security State (`DISABLE_DB_SECURITY`)
-If PostgreSQL experiences severe connection latency or query spikes due to `rate_limit_counters` or `idempotency_keys`:
-1. In Render Dashboard, set:
-   ```env
-   DISABLE_DB_SECURITY=true
-   ```
-2. Save and redeploy.
-3. **Impact:** The API immediately switches back to the high-performance, process-local in-memory store for rate limiting, idempotency, and OTP sessions without taking down the service.
+### 2.1 Strict Prohibition of In-Memory Security Fallbacks in Production
+In production (`NODE_ENV=production`), the application strictly enforces distributed database-backed security state:
+- The system **never** silently falls back to in-memory rate limiting, OTP sessions, idempotency, or ticket nonce consumption.
+- Setting `DISABLE_DB_SECURITY=true` in production is rejected at startup with a `SECURITY_VIOLATION` exception.
+- If PostgreSQL connectivity is interrupted, the security layers fail closed (HTTP 503) rather than allowing unauthenticated registrations or replay attacks across container instances.
+- If database performance degrades under load, perform connection pool tuning (`max`, `idle_timeout`) or scale the PostgreSQL compute instance rather than disabling shared security verification.
 
 ---
 
@@ -87,3 +83,4 @@ Following a rollback, confirm that the system is stable:
    - Create a test request.
    - Confirm request status is `searching` or `donors_notified`.
    - Confirm no errors appear in Render API console.
+

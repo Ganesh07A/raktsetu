@@ -161,3 +161,4 @@ In production (`NODE_ENV=production`), `app.onError` traps all unhandled excepti
   }
   ```
 - Prevents database connection strings, schema names, or driver internals from leaking to attackers.
+

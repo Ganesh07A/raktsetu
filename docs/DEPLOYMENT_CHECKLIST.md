@@ -118,3 +118,4 @@ Perform the following smoke tests on the deployed staging environment:
    - Refresh page: verify accepted donor contact details are now withheld.
 5. **CORS & Preflight Check:**
    - Inspect browser DevTools Network tab: verify preflight `OPTIONS` requests return `204 No Content` with `Access-Control-Allow-Headers: Content-Type, Authorization, Idempotency-Key...`.
+
