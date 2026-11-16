@@ -171,6 +171,52 @@ export class PushNotificationService {
       invalidTokens,
     };
   }
+
+  async sendDirectTestMessage(
+    token: string,
+    title: string,
+    body: string,
+    options?: {
+      data?: Record<string, string>;
+      actions?: Array<{ action: string; title: string }>;
+      requireInteraction?: boolean;
+    }
+  ): Promise<{ success: boolean; messageId: string | null; error?: string }> {
+    const messaging = getMessagingClient();
+    if (!messaging) {
+      return { success: false, messageId: null, error: 'FCM Messaging client is not initialized' };
+    }
+    try {
+      const messageId = await messaging.send({
+        token,
+        notification: { title, body },
+        data: {
+          title,
+          body,
+          responsePath: '/en/donor/dashboard',
+          ...(options?.data || {}),
+        },
+        webpush: {
+          headers: { TTL: '3600', Urgency: 'high' },
+          notification: {
+            title,
+            body,
+            icon: '/icons/icon-192x192.png',
+            badge: '/icons/icon-192x192.png',
+            requireInteraction: options?.requireInteraction ?? true,
+            actions: options?.actions,
+            data: {
+              responsePath: '/en/donor/dashboard',
+              ...(options?.data || {}),
+            },
+          },
+        },
+      });
+      return { success: true, messageId };
+    } catch (err: any) {
+      return { success: false, messageId: null, error: err?.message || String(err) };
+    }
+  }
 }
 
 export const pushNotificationService = new PushNotificationService();

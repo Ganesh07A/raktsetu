@@ -58,6 +58,8 @@ describe('GET /health', () => {
 
   it('never leaks secret values', async () => {
     process.env.NODE_ENV = 'test';
+    const origProjectId = process.env.FIREBASE_PROJECT_ID;
+    delete process.env.FIREBASE_PROJECT_ID;
     process.env.FIREBASE_SERVICE_ACCOUNT_JSON = JSON.stringify({
       project_id: 'demo-project',
       client_email: 'svc@demo.iam.gserviceaccount.com',
@@ -75,6 +77,9 @@ describe('GET /health', () => {
     };
     expect(body.push.configured).toBe(true);
     expect(body.push.projectId).toBe('demo-project');
+    if (origProjectId !== undefined) {
+      process.env.FIREBASE_PROJECT_ID = origProjectId;
+    }
   });
 
   it('flags the deployed web origin when it is missing from CORS_ORIGIN', async () => {

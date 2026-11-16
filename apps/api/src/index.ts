@@ -87,6 +87,13 @@ if (process.env.NODE_ENV !== 'test' && process.env.OUTBOX_WORKER_ENABLED !== 'fa
   const pollInterval = Number(process.env.OUTBOX_POLL_INTERVAL_MS || 5000);
   console.log(`[@repo/api] Initializing outbox background worker (polling every ${pollInterval}ms)...`);
   notificationOutbox.startWorker(undefined, pollInterval);
+
+  const shutdown = () => {
+    console.log('[@repo/api] Gracefully stopping outbox background worker...');
+    notificationOutbox.stopWorker();
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
 
 export default { port, fetch: app.fetch };

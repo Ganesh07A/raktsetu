@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeAll, afterAll } from 'bun:test';
-import { db, bloodRequests, donorNotifications, donorProfiles, eq, inArray } from '../packages/db/src/index.ts';
+import { db, bloodRequests, donorNotifications, donorProfiles, donorPushSubscriptions, eq, inArray } from '../packages/db/src/index.ts';
 import { NotificationOutboxService } from '../apps/api/src/services/notification-outbox.ts';
 import { pushNotificationService } from '../apps/api/src/services/push-notifications.ts';
 
@@ -30,6 +30,13 @@ describe('Checkpoint 4.2: Durable Outbox Recovery & PostgreSQL Row Locking', () 
     testDonor1 = existingDonors[0].id;
     testDonor2 = existingDonors[1]?.id || existingDonors[0].id;
     testDonor3 = existingDonors[2]?.id || existingDonors[0].id;
+
+    // Ensure test donors have registered push tokens for outbox dispatch tests
+    await db.insert(donorPushSubscriptions).values({
+      donorId: testDonor1,
+      fcmToken: 'test-token-recovery-' + testDonor1,
+      platform: 'web',
+    }).onConflictDoNothing();
 
     // Clean up any previous test data
     await db.delete(donorNotifications).where(inArray(donorNotifications.requestId, [testRequestId, testTerminalReqId]));
@@ -70,6 +77,7 @@ describe('Checkpoint 4.2: Durable Outbox Recovery & PostgreSQL Row Locking', () 
     try {
       await db.delete(donorNotifications).where(inArray(donorNotifications.requestId, [testRequestId, testTerminalReqId]));
       await db.delete(bloodRequests).where(inArray(bloodRequests.id, [testRequestId, testTerminalReqId]));
+      await db.delete(donorPushSubscriptions).where(eq(donorPushSubscriptions.fcmToken, 'test-token-recovery-' + testDonor1));
     } catch {}
     delete process.env.TEST_LIVE_DB;
   }, 30000);
