@@ -1876,15 +1876,20 @@ export function RequestWizard() {
               </div>
             </div>
 
-            {requestError && <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800">{requestError}</p>}
             {/* Send the actual request; donor matching and notification delivery are handled by the API. */}
-            <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-white/95 backdrop-blur-md border-t border-slate-100 z-30">
+            <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-white/95 backdrop-blur-md border-t border-slate-100 z-30 flex flex-col gap-2">
+              {requestError && (
+                <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs font-semibold text-red-700 text-center">
+                  {requestError}
+                </p>
+              )}
               <Button
                 type="button"
                 onClick={handleSendRequest}
+                disabled={isSending}
                 className="w-full h-12 rounded-xl text-base font-semibold shadow-md bg-rose-500 hover:bg-rose-600 text-white active:scale-[0.99]"
               >
-                {isHi ? 'आपातकालीन अनुरोध भेजें' : 'Send emergency request'}
+                {isSending ? (isHi ? 'भेजा जा रहा है…' : 'Sending…') : (isHi ? 'आपातकालीन अनुरोध भेजें' : 'Send emergency request')}
               </Button>
             </div>
           </div>
