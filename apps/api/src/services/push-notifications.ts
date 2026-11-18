@@ -63,6 +63,8 @@ export class PushNotificationService {
     const responsePath =
       `/${params.language || 'en'}/donor/respond/${encodeURIComponent(params.requestId)}` +
       `?responseToken=${encodeURIComponent(params.responseToken)}`;
+    const publicOrigin = process.env.PUBLIC_WEB_ORIGIN || 'https://raktsetu-six.vercel.app';
+    const absoluteResponseUrl = `${publicOrigin.replace(/\/$/, '')}${responsePath}`;
 
     if (process.env.MOCK_SERVICES === 'true' || process.env.NODE_ENV === 'test') {
       const messageId = `mock-push-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -123,7 +125,7 @@ export class PushNotificationService {
             },
           },
           fcmOptions: {
-            link: responsePath,
+            link: absoluteResponseUrl,
           },
         },
       }));
