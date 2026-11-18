@@ -53,6 +53,7 @@ export type RequestStatus = (typeof REQUEST_STATUSES)[number];
 
 export const NOTIFICATION_STATUSES = [
   'pending',
+  'processing',
   'sent',
   'delivered',
   'read',
@@ -60,14 +61,33 @@ export const NOTIFICATION_STATUSES = [
   'declined',
   'expired',
   'failed',
+  'exhausted',
+  'cancelled',
 ] as const;
 export type NotificationStatus = (typeof NOTIFICATION_STATUSES)[number];
 
 export const FULFILLMENT_SOURCES = ['blood_bank', 'donor'] as const;
 export type FulfillmentSource = (typeof FULFILLMENT_SOURCES)[number];
 
-export const BLOOD_BANK_SOURCES = ['eraktkosh', 'manual', 'partner'] as const;
+export const BLOOD_BANK_SOURCES = ['eraktkosh', 'manual', 'partner', 'unverified'] as const;
 export type BloodBankSource = (typeof BLOOD_BANK_SOURCES)[number];
+
+export const STOCK_VERIFICATION_STATUSES = [
+  'source_reported',
+  'partner_confirmed',
+  'unverified',
+  'unavailable',
+] as const;
+export type StockVerificationStatus = (typeof STOCK_VERIFICATION_STATUSES)[number];
+
+export const MAX_ALLOWED_SEARCH_RADIUS_KM = 50;
+export const MIN_DONOR_AGE = 18;
+export const MAX_DONOR_AGE = 65;
+export const MIN_DONOR_WEIGHT_KG = 45;
+export const MAX_DONOR_WEIGHT_KG = 200;
+
+export const MEDICAL_DISCLAIMER =
+  'Blood availability must be confirmed directly with the blood bank and the treating hospital. Final compatibility and cross-matching must be performed by qualified medical professionals.';
 
 export const GENDERS = ['male', 'female', 'other'] as const;
 export type Gender = (typeof GENDERS)[number];

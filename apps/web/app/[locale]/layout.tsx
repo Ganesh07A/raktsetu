@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation';
 import { routing, Link } from '../../src/routing';
 import { RegisterServiceWorker } from '../components/register-sw';
 import { ForegroundPushListener } from '../components/foreground-push-listener';
+import { DonorNavButton } from '../components/donor-nav-button';
 import { LanguageSwitcher } from '../components/language-switcher';
 import '../globals.css';
 import { HeartPulse, PhoneCall, ShieldAlert, Droplet } from 'lucide-react';
@@ -109,6 +110,8 @@ export default async function LocaleLayout({
 
               {/* Navigation Actions */}
               <div className="flex items-center gap-2 sm:gap-4">
+                <DonorNavButton />
+
                 <Link
                   href="/offline"
                   className="hidden md:inline-flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-red-600 transition-colors px-2 py-1"

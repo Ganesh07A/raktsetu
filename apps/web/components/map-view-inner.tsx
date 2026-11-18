@@ -17,7 +17,7 @@ export interface MapMarkerItem {
   stock?: {
     bloodGroup: string;
     componentType: string;
-    unitsAvailable: number;
+    unitsAvailable: number | null;
   }[];
   isVerified?: boolean;
 }
@@ -175,7 +175,7 @@ export function MapViewInner({
               ? createUserLocationIcon()
               : createBloodBankIcon(marker.isVerified);
 
-          const totalStock = marker.stock?.reduce((acc, s) => acc + s.unitsAvailable, 0) ?? 0;
+          const totalStock = marker.stock?.reduce((acc, s) => acc + (s.unitsAvailable ?? 0), 0) ?? 0;
 
           return (
             <Marker

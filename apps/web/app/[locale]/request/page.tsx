@@ -9,6 +9,16 @@ export const metadata: Metadata = {
 };
 
 export default function RequestPage() {
-  return <RequestWizard />;
+  return (
+    <React.Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center p-6 text-slate-500">
+          <div className="animate-pulse">Loading emergency request wizard...</div>
+        </div>
+      }
+    >
+      <RequestWizard />
+    </React.Suspense>
+  );
 }
 

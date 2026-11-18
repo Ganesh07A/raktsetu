@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, integer, index } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { bloodRequests } from './blood-requests';
 import { donorProfiles } from './donor-profiles';
@@ -17,6 +17,7 @@ export const donorNotifications = pgTable(
     status: text('status', {
       enum: [
         'pending',
+        'processing',
         'sent',
         'delivered',
         'read',
@@ -24,6 +25,8 @@ export const donorNotifications = pgTable(
         'declined',
         'expired',
         'failed',
+        'exhausted',
+        'cancelled',
       ],
     })
       .notNull()
@@ -31,6 +34,14 @@ export const donorNotifications = pgTable(
     sentAt: timestamp('sent_at', { withTimezone: true }),
     respondedAt: timestamp('responded_at', { withTimezone: true }),
     responseNote: text('response_note'),
+    attempts: integer('attempts').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull().default(3),
+    lastAttemptedAt: timestamp('last_attempted_at', { withTimezone: true }),
+    nextRetryAt: timestamp('next_retry_at', { withTimezone: true }).defaultNow(),
+    lockedBy: text('locked_by'),
+    lockedAt: timestamp('locked_at', { withTimezone: true }),
+    leaseToken: text('lease_token'),
+    errorDetails: text('error_details'),
   },
   (table) => [
     index('notifications_request_status_idx').on(
@@ -39,6 +50,8 @@ export const donorNotifications = pgTable(
     ),
     index('notifications_donor_idx').on(table.donorId),
     index('notifications_push_id_idx').on(table.pushMessageId),
+    index('notifications_outbox_queue_idx').on(table.status, table.nextRetryAt),
+    index('notifications_lease_token_idx').on(table.leaseToken),
   ]
 );
 

@@ -3,6 +3,7 @@ import {
   haversineDistance,
   DONATION_INTERVAL_DAYS,
   type BloodGroup,
+  type ComponentType,
   type Gender,
   type DonorProfile,
 } from '@repo/shared';
@@ -40,11 +41,13 @@ export interface MatchedDonor {
 
 export interface DonorMatcherParams {
   recipientBloodGroup: BloodGroup;
+  componentType?: ComponentType;
   latitude: number;
   longitude: number;
   radiusKm?: number;
   limit?: number;
   referenceDate?: Date;
+  excludeIneligible?: boolean;
 }
 
 export class DonorMatcherService {
@@ -102,6 +105,7 @@ export class DonorMatcherService {
   ): Promise<MatchedDonor[]> {
     const {
       recipientBloodGroup,
+      componentType,
       latitude,
       longitude,
       radiusKm = 10,
@@ -109,7 +113,7 @@ export class DonorMatcherService {
       referenceDate = new Date(),
     } = params;
 
-    const compatibleGroups = getCompatibleDonorGroups(recipientBloodGroup);
+    const compatibleGroups = getCompatibleDonorGroups(recipientBloodGroup, componentType);
 
     // Candidates source: Try real Postgres DB if available, else mock store
     let candidateDonors: Array<
@@ -201,7 +205,10 @@ export class DonorMatcherService {
         continue;
       }
 
-      // 3. Distance calculation
+      // 3. Hard radius limit of 50 km enforced server-side
+      const effectiveRadius = Math.min(50, Math.max(1, radiusKm));
+
+      // Distance calculation
       const dist = haversineDistance(
         latitude,
         longitude,
@@ -209,14 +216,26 @@ export class DonorMatcherService {
         donor.longitude
       );
 
-      // Check within radius
-      if (dist <= radiusKm) {
-        // 4. Soft eligibility assessment
+      // Check within seeker search radius AND within donor travel willingness radius (H-03)
+      const donorMaxRadius =
+        typeof donor.searchRadiusKm === 'number' && donor.searchRadiusKm > 0
+          ? donor.searchRadiusKm
+          : 10;
+      const withinSeekerRadius = dist <= effectiveRadius;
+      const withinDonorRadius = dist <= donorMaxRadius;
+
+      if (withinSeekerRadius && withinDonorRadius) {
+        // 4. Eligibility assessment
         const assessment = this.evaluateEligibility(
           donor.gender,
           donor.lastDonationDate,
           referenceDate
         );
+
+        // If excludeIneligible is requested (e.g. for emergency notification cascades), skip ineligible donors
+        if (params.excludeIneligible && !assessment.eligible) {
+          continue;
+        }
 
         matchedList.push({
           id: donor.id,

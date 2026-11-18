@@ -129,7 +129,17 @@ export class PushNotificationService {
       }));
 
       try {
-        const result = await messaging.sendEach(messages);
+        const timeoutMs = Number(process.env.FCM_TIMEOUT_MS || 15000);
+        let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(
+            () => reject(new Error(`FCM batch send timed out after ${timeoutMs}ms`)),
+            timeoutMs
+          );
+        });
+
+        const result = await Promise.race([messaging.sendEach(messages), timeoutPromise]);
+        if (timeoutHandle) clearTimeout(timeoutHandle);
         result.responses.forEach((response, index) => {
           if (response.success) {
             successCount += 1;
@@ -160,6 +170,52 @@ export class PushNotificationService {
       mode: 'live',
       invalidTokens,
     };
+  }
+
+  async sendDirectTestMessage(
+    token: string,
+    title: string,
+    body: string,
+    options?: {
+      data?: Record<string, string>;
+      actions?: Array<{ action: string; title: string }>;
+      requireInteraction?: boolean;
+    }
+  ): Promise<{ success: boolean; messageId: string | null; error?: string }> {
+    const messaging = getMessagingClient();
+    if (!messaging) {
+      return { success: false, messageId: null, error: 'FCM Messaging client is not initialized' };
+    }
+    try {
+      const messageId = await messaging.send({
+        token,
+        notification: { title, body },
+        data: {
+          title,
+          body,
+          responsePath: '/en/donor/dashboard',
+          ...(options?.data || {}),
+        },
+        webpush: {
+          headers: { TTL: '3600', Urgency: 'high' },
+          notification: {
+            title,
+            body,
+            icon: '/icons/icon-192x192.png',
+            badge: '/icons/icon-192x192.png',
+            requireInteraction: options?.requireInteraction ?? true,
+            actions: options?.actions,
+            data: {
+              responsePath: '/en/donor/dashboard',
+              ...(options?.data || {}),
+            },
+          },
+        },
+      });
+      return { success: true, messageId };
+    } catch (err: any) {
+      return { success: false, messageId: null, error: err?.message || String(err) };
+    }
   }
 }
 

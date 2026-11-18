@@ -6,13 +6,17 @@ export default async function RequestWaitingRoomPage({
   searchParams,
 }: {
   params: Promise<{ locale: string; id: string }>;
-  searchParams: Promise<{ closeToken?: string }>;
+  searchParams: Promise<{ closeToken?: string; viewToken?: string }>;
 }) {
   const [{ id }, query] = await Promise.all([params, searchParams]);
 
   return (
     <div className="py-4">
-      <WaitingRoom requestId={id} requestCloseToken={query.closeToken || null} />
+      <WaitingRoom
+        requestId={id}
+        requestCloseToken={query.closeToken || null}
+        requestViewToken={query.viewToken || null}
+      />
     </div>
   );
 }

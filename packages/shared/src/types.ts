@@ -9,6 +9,7 @@ import type {
   NotificationStatus,
   FulfillmentSource,
   BloodBankSource,
+  StockVerificationStatus,
   Gender,
 } from './constants';
 
@@ -23,6 +24,7 @@ export type {
   NotificationStatus,
   FulfillmentSource,  
   BloodBankSource,
+  StockVerificationStatus,
   Gender,
 };
 
@@ -73,6 +75,13 @@ export interface BloodRequest {
   searchRadiusKm: number;
   status: RequestStatus;
   fulfillmentSource: FulfillmentSource | null;
+  matchedBankId?: string | null;
+  matchedBankName?: string | null;
+  matchedBankPhone?: string | null;
+  matchedBankAddress?: string | null;
+  matchedBankDistanceKm?: number | null;
+  matchedBankProvenance?: BloodBankSource | null;
+  matchedBankVerificationStatus?: StockVerificationStatus | null;
   createdAt: Date | string;
   expiresAt: Date | string | null;
 }
@@ -119,9 +128,11 @@ export interface BloodStock {
 export interface StockItem {
   bloodGroup: BloodGroup;
   componentType: ComponentType;
-  unitsAvailable: number;
+  unitsAvailable: number | null;
   earliestExpiry?: string | null;
   lastUpdated?: string | null;
+  verificationStatus?: StockVerificationStatus;
+  source?: BloodBankSource;
 }
 
 export interface BloodBankCardData {
@@ -140,7 +151,16 @@ export interface BloodBankCardData {
   stock: StockItem[];
   isVerified: boolean;
   source: BloodBankSource;
+  verificationStatus?: StockVerificationStatus;
   lastStockUpdate: string | null;
+  isStockAvailable?: boolean;
+}
+
+export interface PublicDonorMatchSummary {
+  matchedCount: number;
+  radiusKm: number;
+  recipientBloodGroup: BloodGroup;
+  eligibleCount?: number;
 }
 
 export interface AcceptedDonorContact {

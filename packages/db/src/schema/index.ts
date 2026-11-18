@@ -6,3 +6,4 @@ export * from './blood-banks';
 export * from './blood-stock';
 
 export * from './donor-push-subscriptions';
+export * from './security-state';

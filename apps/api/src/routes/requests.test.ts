@@ -156,7 +156,7 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
           searchRadiusKm: 10,
         }),
       });
-      const created = (await createRes.json()) as { request: { id: string } };
+      const created = (await createRes.json()) as { request: { id: string }; requestViewToken?: string };
       const reqId = created.request.id;
 
       // 2. Initial state: No donor has accepted yet
@@ -188,9 +188,17 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
       });
       expect(respondRes.status).toBe(200);
 
-      // 4. Waiting room unlocks unmasked contact details after acceptance
-      const acceptedRes = await app.request(`/api/v1/requests/${reqId}`);
+      // 4. Waiting room unlocks unmasked contact details after acceptance when authorized with viewToken
+      const acceptedRes = await app.request(`/api/v1/requests/${reqId}`, {
+        headers: { Authorization: `Bearer ${created.requestViewToken}` },
+      });
       expect(acceptedRes.status).toBe(200);
+
+      // Verify anonymous polling still gets empty acceptedDonors for privacy
+      const anonRes = await app.request(`/api/v1/requests/${reqId}`);
+      expect(anonRes.status).toBe(200);
+      const anonJson = (await anonRes.json()) as { acceptedDonors: unknown[] };
+      expect(anonJson.acceptedDonors.length).toBe(0);
 
       const acceptedJson = (await acceptedRes.json()) as {
         request: { status: string; fulfillmentSource: string };
@@ -227,7 +235,7 @@ describe('Blood Requests Lifecycle API (/api/v1/requests)', () => {
           searchRadiusKm: 10,
         }),
       });
-      const created = (await createRes.json()) as { request: { id: string } };
+      const created = (await createRes.json()) as { request: { id: string }; requestViewToken?: string };
       const reqId = created.request.id;
 
       // 2. Donor declines

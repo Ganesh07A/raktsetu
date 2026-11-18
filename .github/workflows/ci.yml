@@ -35,6 +35,15 @@ jobs:
 
       - name: Run unit & integration tests
         run: bun run test
+        env:
+          NODE_ENV: test
+          PUBLIC_WEB_ORIGIN: https://raktsetu-six.vercel.app
+          CORS_ORIGIN: http://localhost:3000,https://raktkhoj.org,https://raktsetu-six.vercel.app
+          DONOR_SESSION_SECRET: ci-test-session-secret-key-32chars
+          OTP_PEPPER: ci-test-otp-pepper-key-32characters
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
 
       - name: Build monorepo packages
         run: bun run build

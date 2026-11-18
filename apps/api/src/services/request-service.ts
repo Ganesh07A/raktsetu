@@ -24,9 +24,11 @@ import {
 import { mockStore } from './mock-store';
 
 export class RequestService {
-  private isLiveDb(): boolean {
+  public isLiveDb(): boolean {
+    if (Boolean(process.env.TEST_RUNNER || process.env.BUN_TEST || process.env.NODE_ENV === 'test')) {
+      return Boolean(process.env.TEST_LIVE_DB === 'true' && process.env.DATABASE_URL);
+    }
     return Boolean(
-      process.env.NODE_ENV !== 'test' &&
       process.env.DATABASE_URL &&
       db &&
       process.env.MOCK_SERVICES !== 'true'
@@ -37,10 +39,7 @@ export class RequestService {
    * Persist a new blood request
    */
   public async createRequest(request: BloodRequest): Promise<BloodRequest> {
-    // 1. Always keep in-memory store in sync for fast lookup & mock mode
-    mockStore.createRequest(request);
-
-    // 2. Persist to live PostgreSQL database if available
+    // 1. Persist to live PostgreSQL database if configured (fail-closed in production)
     if (this.isLiveDb()) {
       try {
         await db
@@ -62,14 +61,25 @@ export class RequestService {
             searchRadiusKm: request.searchRadiusKm,
             status: request.status,
             fulfillmentSource: (request.fulfillmentSource as any) ?? null,
+            matchedBankId: request.matchedBankId ?? null,
+            matchedBankName: request.matchedBankName ?? null,
+            matchedBankPhone: request.matchedBankPhone ?? null,
+            matchedBankAddress: request.matchedBankAddress ?? null,
+            matchedBankDistanceKm: request.matchedBankDistanceKm ?? null,
+            matchedBankProvenance: request.matchedBankProvenance ?? null,
+            matchedBankVerificationStatus: request.matchedBankVerificationStatus ?? null,
             createdAt: request.createdAt ? new Date(request.createdAt) : new Date(),
             expiresAt: request.expiresAt ? new Date(request.expiresAt) : null,
           })
           .onConflictDoNothing();
       } catch (err) {
-        console.warn('[@repo/api] Warning: Failed to persist blood request to DB, keeping in mockStore:', err);
+        console.error('[@repo/api] Error: Failed to persist blood request to live database:', err);
+        throw new Error('DATABASE_PERSISTENCE_FAILED');
       }
     }
+
+    // 2. Keep in-memory store in sync for fast lookup & test/mock mode
+    mockStore.createRequest(request);
 
     return request;
   }
@@ -351,6 +361,88 @@ export class RequestService {
   }
 
   /**
+   * Update request status enforcing strict state machine transitions and terminal state protection.
+   */
+  public async updateRequestStatus(
+    requestId: string,
+    targetStatus: RequestStatus,
+    fulfillmentSource?: string | null
+  ): Promise<{ success: boolean; requestStatus?: RequestStatus; error?: string }> {
+    const ALLOWED_TRANSITIONS: Record<RequestStatus, RequestStatus[]> = {
+      searching: ['bank_found', 'donors_notified', 'cancelled', 'expired'],
+      bank_found: ['donors_notified', 'fulfilled', 'cancelled', 'expired'],
+      donors_notified: ['fulfilled', 'cancelled', 'expired'],
+      fulfilled: ['donors_notified'], // only allowed if sole accepted donor declines
+      cancelled: [], // terminal
+      expired: [], // terminal
+    };
+
+    if (!this.isLiveDb()) {
+      const existing = mockStore.getRequest(requestId);
+      if (!existing) return { success: false, error: `Request ${requestId} not found` };
+
+      const currentStatus = existing.status;
+      if (currentStatus === targetStatus) {
+        return { success: true, requestStatus: currentStatus };
+      }
+      const allowed = ALLOWED_TRANSITIONS[currentStatus] || [];
+      if (!allowed.includes(targetStatus)) {
+        return {
+          success: false,
+          error: `Illegal state transition from ${currentStatus} to ${targetStatus}`,
+        };
+      }
+      existing.status = targetStatus;
+      if (fulfillmentSource !== undefined) existing.fulfillmentSource = fulfillmentSource as any;
+      return { success: true, requestStatus: targetStatus };
+    }
+
+    return await db.transaction(async (tx) => {
+      const rows = await tx
+        .select()
+        .from(bloodRequests)
+        .where(eq(bloodRequests.id, requestId))
+        .for('update')
+        .limit(1);
+
+      if (!rows[0]) return { success: false, error: `Request ${requestId} not found` };
+
+      const currentStatus = rows[0].status as RequestStatus;
+      if (currentStatus === targetStatus) {
+        return { success: true, requestStatus: currentStatus };
+      }
+
+      const allowed = ALLOWED_TRANSITIONS[currentStatus] || [];
+      if (!allowed.includes(targetStatus)) {
+        return {
+          success: false,
+          error: `Illegal state transition from ${currentStatus} to ${targetStatus}`,
+        };
+      }
+
+      const updated = await tx
+        .update(bloodRequests)
+        .set({
+          status: targetStatus,
+          ...(fulfillmentSource !== undefined ? { fulfillmentSource: fulfillmentSource as any } : {}),
+        })
+        .where(eq(bloodRequests.id, requestId))
+        .returning();
+
+      if (updated.length === 0) {
+        return { success: false, error: `Failed to update status for request ${requestId}` };
+      }
+
+      mockStore.updateRequest(requestId, {
+        status: targetStatus,
+        ...(fulfillmentSource !== undefined ? { fulfillmentSource: fulfillmentSource as any } : {}),
+      });
+
+      return { success: true, requestStatus: targetStatus };
+    });
+  }
+
+  /**
    * Fetch blood request and accepted donor contacts
    */
   public async getRequestWithDetails(id: string): Promise<{
@@ -390,6 +482,13 @@ export class RequestService {
             searchRadiusKm: r.searchRadiusKm as RadiusPreset,
             status: r.status as RequestStatus,
             fulfillmentSource: r.fulfillmentSource as any,
+            matchedBankId: r.matchedBankId,
+            matchedBankName: r.matchedBankName,
+            matchedBankPhone: r.matchedBankPhone,
+            matchedBankAddress: r.matchedBankAddress,
+            matchedBankDistanceKm: r.matchedBankDistanceKm,
+            matchedBankProvenance: r.matchedBankProvenance as any,
+            matchedBankVerificationStatus: r.matchedBankVerificationStatus as any,
             createdAt: r.createdAt.toISOString(),
             expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null,
           };
@@ -410,8 +509,8 @@ export class RequestService {
               longitude: donorProfiles.longitude,
             })
             .from(donorNotifications)
-            .innerJoin(donorProfiles, eq(donorNotifications.donorId, donorProfiles.id))
-            .innerJoin(users, eq(donorProfiles.userId, users.id))
+            .leftJoin(donorProfiles, eq(donorNotifications.donorId, donorProfiles.id))
+            .leftJoin(users, eq(donorProfiles.userId, users.id))
             .where(eq(donorNotifications.requestId, id));
 
           notifications = notifRows.map((n) => ({
@@ -431,12 +530,15 @@ export class RequestService {
           // Collect accepted donors
           for (const n of notifRows) {
             if (n.status === 'accepted') {
-              const dist = haversineDistance(
-                request.latitude,
-                request.longitude,
-                n.latitude,
-                n.longitude
-              );
+              const dist =
+                n.latitude != null && n.longitude != null
+                  ? haversineDistance(
+                      request.latitude,
+                      request.longitude,
+                      n.latitude,
+                      n.longitude
+                    )
+                  : 5;
               const donorName = n.donorName || 'Volunteer Donor';
               const donorPhone = n.donorPhone || '+919999999999';
 

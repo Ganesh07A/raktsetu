@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 /**
  * Single source of truth for how this API is configured.
  * IMPORTANT: never return secret *values* from here — only booleans and non-secret identifiers.
@@ -23,6 +26,37 @@ export interface ConfigReport {
   };
   cors: { origins: string[] };
 }
+
+let fallbackLoaded = false;
+function loadFallbackEnv(): void {
+  if (fallbackLoaded || process.env.PUBLIC_WEB_ORIGIN) return;
+  fallbackLoaded = true;
+  const candidates = [
+    path.resolve(import.meta.dir, '../../.env'),
+    path.resolve(import.meta.dir, '../../../../apps/api/.env'),
+    path.resolve(process.cwd(), 'apps/api/.env'),
+  ];
+  for (const envPath of candidates) {
+    if (fs.existsSync(envPath)) {
+      try {
+        const content = fs.readFileSync(envPath, 'utf8');
+        for (const line of content.split('\n')) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) continue;
+          const [k, ...v] = trimmed.split('=');
+          if (k?.trim() === 'PUBLIC_WEB_ORIGIN' && !process.env.PUBLIC_WEB_ORIGIN) {
+            process.env.PUBLIC_WEB_ORIGIN = v.join('=').trim().replace(/^["']|["']$/g, '');
+            break;
+          }
+        }
+        if (process.env.PUBLIC_WEB_ORIGIN) break;
+      } catch {}
+    }
+  }
+}
+
+loadFallbackEnv();
+
 const read = (name: string): string => (process.env[name] ?? '').trim();
 export function inspectConfig(): ConfigReport {
   const serviceAccountJson = read('FIREBASE_SERVICE_ACCOUNT_JSON');

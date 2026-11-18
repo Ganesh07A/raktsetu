@@ -125,7 +125,7 @@ bloodBankRoutes.get('/search', async (c) => {
           matchingStock = bank.stock.filter(
             (s) => s.bloodGroup === bloodGroup &&
               s.componentType === componentType &&
-              s.unitsAvailable > 0
+              (s.unitsAvailable ?? 0) > 0
           );
         }
 
@@ -140,8 +140,8 @@ bloodBankRoutes.get('/search', async (c) => {
   }
 
   matchedBanks = [...(matchedBanks || [])].sort((a, b) => {
-    const aHasStock = a.stock.some((item) => item.unitsAvailable > 0);
-    const bHasStock = b.stock.some((item) => item.unitsAvailable > 0);
+    const aHasStock = a.stock.some((item) => (item.unitsAvailable ?? 0) > 0);
+    const bHasStock = b.stock.some((item) => (item.unitsAvailable ?? 0) > 0);
     if (aHasStock !== bHasStock) return aHasStock ? -1 : 1;
     if (a.distanceKm === null && b.distanceKm !== null) return 1;
     if (a.distanceKm !== null && b.distanceKm === null) return -1;
@@ -154,6 +154,8 @@ bloodBankRoutes.get('/search', async (c) => {
     totalCount: matchedBanks.length,
     source: proxyResult.source,
     cached: proxyResult.cached,
+    disclaimer:
+      'Blood availability must be confirmed directly with the blood bank and the treating hospital. Final compatibility and cross-matching must be performed by qualified medical professionals.',
   });
 });
 

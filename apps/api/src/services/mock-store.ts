@@ -196,6 +196,10 @@ export class MockDataStore {
     return this.notifications.get(requestId) || [];
   }
 
+  public getAllNotifications(): StoredDonorNotification[] {
+    return Array.from(this.notifications.values()).flat();
+  }
+
   public getNotificationsForDonor(donorId: string): StoredDonorNotification[] {
     return Array.from(this.notifications.values())
       .flat()

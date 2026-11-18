@@ -59,6 +59,13 @@ export const bloodRequests = pgTable(
     fulfillmentSource: text('fulfillment_source', {
       enum: ['blood_bank', 'donor'],
     }),
+    matchedBankId: text('matched_bank_id'),
+    matchedBankName: text('matched_bank_name'),
+    matchedBankPhone: text('matched_bank_phone'),
+    matchedBankAddress: text('matched_bank_address'),
+    matchedBankDistanceKm: doublePrecision('matched_bank_distance_km'),
+    matchedBankProvenance: text('matched_bank_provenance'),
+    matchedBankVerificationStatus: text('matched_bank_verification_status'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
