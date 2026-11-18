@@ -117,9 +117,9 @@ export default function DonorRegistrationPage() {
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to dispatch verification code');
+        throw new Error(data.error || (res.status >= 500 ? (isHi ? 'सर्वर अनुपलब्ध है। कृपया कुछ देर बाद प्रयास करें।' : 'Server temporarily unavailable. Please try again shortly.') : 'Failed to dispatch verification code'));
       }
 
       setOtpSent(true);
@@ -150,9 +150,9 @@ export default function DonorRegistrationPage() {
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.error || (isHi ? 'अमान्य OTP कोड' : 'Invalid OTP code'));
+        throw new Error(data.error || (res.status >= 500 ? (isHi ? 'सर्वर अनुपलब्ध है। कृपया कुछ देर बाद प्रयास करें।' : 'Server temporarily unavailable. Please try again shortly.') : (isHi ? 'अमान्य OTP कोड' : 'Invalid OTP code')));
       }
 
       setVerificationTicket(data.verificationTicket);

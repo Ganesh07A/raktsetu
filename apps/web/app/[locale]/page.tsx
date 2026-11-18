@@ -34,9 +34,11 @@ const BLOOD_GROUPS = [
 export default function HomePage() {
   const locale = useLocale();
   const isHi = locale === 'hi';
+  const [mounted, setMounted] = React.useState(false);
   const [isDonor, setIsDonor] = React.useState(false);
 
   React.useEffect(() => {
+    setMounted(true);
     try {
       if (localStorage.getItem('raktkhoj_donor_token') && localStorage.getItem('raktkhoj_donor_id')) {
         setIsDonor(true);
@@ -94,7 +96,7 @@ export default function HomePage() {
               </Link>
             </Button>
 
-            {isDonor ? (
+            {mounted && isDonor ? (
               <Button
                 asChild
                 size="lg"
