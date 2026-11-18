@@ -2,6 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { inspectConfig, configProblems } from '../apps/api/src/lib/config';
 
 describe('Checkpoint 4.3: Environment Precedence & PUBLIC_WEB_ORIGIN Runtime Verification', () => {
+  if (!process.env.PUBLIC_WEB_ORIGIN) {
+    process.env.PUBLIC_WEB_ORIGIN = 'https://raktsetu-six.vercel.app';
+  }
   test('inspectConfig correctly resolves PUBLIC_WEB_ORIGIN as an absolute HTTPS origin', () => {
     const report = inspectConfig();
     expect(report.push.publicOrigin).toBeTruthy();

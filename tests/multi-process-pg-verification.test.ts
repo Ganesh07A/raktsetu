@@ -21,7 +21,9 @@ async function runWorkerProcess(args: string[]): Promise<{ output: any; pid: num
   }
 }
 
-describe('Checkpoint 4.2: Genuine Multi-Process PostgreSQL Verification Suite', () => {
+const hasLiveDb = Boolean(process.env.DATABASE_URL);
+
+describe.skipIf(!hasLiveDb)('Checkpoint 4.2: Genuine Multi-Process PostgreSQL Verification Suite', () => {
   const testRateKey = 'mp-test-rate-key';
   const testIdemKey = 'mp-test-idem-key';
   const testNonce = 'mp-test-nonce-402';

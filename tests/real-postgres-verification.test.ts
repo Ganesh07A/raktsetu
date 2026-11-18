@@ -2,7 +2,9 @@ import { describe, expect, test, beforeAll, afterAll } from 'bun:test';
 import { db, sql, idempotencyKeys, otpSessions, consumedTicketNonces, rateLimitCounters, eq } from '../packages/db/src/index.ts';
 import { SecurityStore, type StoredOtpSession } from '../apps/api/src/services/security-store.ts';
 
-describe('Checkpoint 4.1: Real PostgreSQL Integration Verification Suite', () => {
+const hasLiveDb = Boolean(process.env.DATABASE_URL);
+
+describe.skipIf(!hasLiveDb)('Checkpoint 4.1: Real PostgreSQL Integration Verification Suite', () => {
   let storeA: SecurityStore;
   let storeB: SecurityStore;
 

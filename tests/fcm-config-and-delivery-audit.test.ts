@@ -7,7 +7,9 @@ import { createDonorSessionToken } from '../apps/api/src/services/donor-session'
 import { mockStore } from '../apps/api/src/services/mock-store';
 import { db, donorPushSubscriptions, eq } from '../packages/db/src/index';
 
-describe('Checkpoint 4.7: Firebase FCM Configuration & Delivery Audit', () => {
+const hasLiveDb = Boolean(process.env.DATABASE_URL);
+
+describe.skipIf(!hasLiveDb)('Checkpoint 4.7: Firebase FCM Configuration & Delivery Audit', () => {
   let testDonorId = 'donor-staging-fcm-test';
   let validSessionToken: string;
 

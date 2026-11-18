@@ -13,7 +13,8 @@ describe('RaktSetu — Full Notification Service End-to-End Flow Audit', () => {
   });
 
   // STEP 1: Firebase Configuration & FCM Service Readiness
-  it('Step 1: Firebase Cloud Messaging configuration and Admin SDK are active', () => {
+  const hasFirebase = Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.FIREBASE_PROJECT_ID);
+  it.skipIf(!hasFirebase)('Step 1: Firebase Cloud Messaging configuration and Admin SDK are active', () => {
     const config = inspectConfig();
     expect(config.push.configured).toBe(true);
     expect(config.push.projectId).toBe('raktsetu-be5fb');

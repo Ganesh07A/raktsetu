@@ -16,7 +16,9 @@ import {
   createRequestCloseToken,
 } from '../apps/api/src/services/donor-session';
 
-describe('Checkpoint 4.9: Complete Donor Response & Seeker Visibility Lifecycle', () => {
+const hasLiveDb = Boolean(process.env.DATABASE_URL);
+
+describe.skipIf(!hasLiveDb)('Checkpoint 4.9: Complete Donor Response & Seeker Visibility Lifecycle', () => {
   // Test IDs
   const testRequestId = `req-life-test-${Date.now()}`;
   const testCancelledReqId = `req-life-cancel-${Date.now()}`;

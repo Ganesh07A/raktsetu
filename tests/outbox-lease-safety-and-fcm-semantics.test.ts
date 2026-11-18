@@ -11,7 +11,9 @@ import {
 import { NotificationOutboxService } from '../apps/api/src/services/notification-outbox.ts';
 import { pushNotificationService } from '../apps/api/src/services/push-notifications.ts';
 
-describe('Checkpoint 4.3: Strict Worker Lease Fencing & FCM Delivery Semantics', () => {
+const hasLiveDb = Boolean(process.env.DATABASE_URL);
+
+describe.skipIf(!hasLiveDb)('Checkpoint 4.3: Strict Worker Lease Fencing & FCM Delivery Semantics', () => {
   let outbox1: NotificationOutboxService;
   let outbox2: NotificationOutboxService;
 

@@ -3,7 +3,9 @@ import { db, donorPushSubscriptions, donorNotifications, bloodRequests, eq, desc
 import { pushNotificationService } from '../apps/api/src/services/push-notifications';
 import { notificationOutbox } from '../apps/api/src/services/notification-outbox';
 
-describe('Checkpoint 4.8: Interactive Chrome FCM Delivery Verification', () => {
+const hasLiveDb = Boolean(process.env.DATABASE_URL);
+
+describe.skipIf(!hasLiveDb)('Checkpoint 4.8: Interactive Chrome FCM Delivery Verification', () => {
   const syntheticDonorId = 'donor-1794841871476-947';
   let activeToken: string = '';
   const originalNodeEnv = process.env.NODE_ENV;

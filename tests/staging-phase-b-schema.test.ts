@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { db, sql } from '../packages/db/src/index.ts';
 
-describe('Phase B: Staging Database Schema & Migration Verification', () => {
+const hasLiveDb = Boolean(process.env.DATABASE_URL);
+
+describe.skipIf(!hasLiveDb)('Phase B: Staging Database Schema & Migration Verification', () => {
   test('1. Verify target database is staging Supabase instance and isolated', async () => {
     const rawUrl = process.env.DATABASE_URL || '';
     expect(rawUrl).toContain('aws-0-eu-north-1.pooler.supabase.com');

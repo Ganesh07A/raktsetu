@@ -3,7 +3,9 @@ import { db, bloodRequests, donorNotifications, donorProfiles, donorPushSubscrip
 import { NotificationOutboxService } from '../apps/api/src/services/notification-outbox.ts';
 import { pushNotificationService } from '../apps/api/src/services/push-notifications.ts';
 
-describe('Checkpoint 4.2: Durable Outbox Recovery & PostgreSQL Row Locking', () => {
+const hasLiveDb = Boolean(process.env.DATABASE_URL);
+
+describe.skipIf(!hasLiveDb)('Checkpoint 4.2: Durable Outbox Recovery & PostgreSQL Row Locking', () => {
   let outbox1: NotificationOutboxService;
   let outbox2: NotificationOutboxService;
 
