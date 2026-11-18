@@ -220,6 +220,7 @@ export const createBloodRequestSchema = z.object({
 export const authOtpSendSchema = z.object({
   phone: phoneSchema,
   purpose: z.enum(['donor_registration', 'emergency_request']).default('donor_registration'),
+  fcmToken: z.string().trim().optional(),
 });
 
 export const authOtpVerifySchema = z.object({

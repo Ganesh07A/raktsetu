@@ -1,5 +1,6 @@
 import { applicationDefault, cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getMessaging, type Message } from 'firebase-admin/messaging';
+import { existsSync, readFileSync } from 'node:fs';
 import { mockStore } from './mock-store';
 import { recordPushOutcome } from '../lib/telemetry';
 
@@ -27,6 +28,8 @@ function getMessagingClient() {
   try {
     const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
     const projectId = process.env.FIREBASE_PROJECT_ID;
+    const googleCredsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS?.replace(/\\/g, '/');
+
     const options = raw
       ? (() => {
           const serviceAccount = JSON.parse(raw);
@@ -35,8 +38,21 @@ function getMessagingClient() {
           }
           return { credential: cert(serviceAccount), ...(projectId ? { projectId } : {}) };
         })()
-      : process.env.GOOGLE_APPLICATION_CREDENTIALS
-        ? { credential: applicationDefault(), ...(projectId ? { projectId } : {}) }
+      : googleCredsPath
+        ? (() => {
+            try {
+              if (existsSync(googleCredsPath)) {
+                const creds = JSON.parse(readFileSync(googleCredsPath, 'utf8'));
+                if (creds.private_key) {
+                  creds.private_key = String(creds.private_key).replace(/\\n/g, '\n');
+                }
+                return { credential: cert(creds), ...(projectId ? { projectId } : {}) };
+              }
+            } catch (fsErr) {
+              console.warn('[@repo/api] Direct credentials read warning:', fsErr);
+            }
+            return { credential: applicationDefault(), ...(projectId ? { projectId } : {}) };
+          })()
         : null;
 
     if (!options) return null;
@@ -63,6 +79,8 @@ export class PushNotificationService {
     const responsePath =
       `/${params.language || 'en'}/donor/respond/${encodeURIComponent(params.requestId)}` +
       `?responseToken=${encodeURIComponent(params.responseToken)}`;
+    const publicOrigin = process.env.PUBLIC_WEB_ORIGIN || 'https://raktsetu-six.vercel.app';
+    const absoluteResponseUrl = `${publicOrigin.replace(/\/$/, '')}${responsePath}`;
 
     if (process.env.MOCK_SERVICES === 'true' || process.env.NODE_ENV === 'test') {
       const messageId = `mock-push-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -123,7 +141,7 @@ export class PushNotificationService {
             },
           },
           fcmOptions: {
-            link: responsePath,
+            link: absoluteResponseUrl,
           },
         },
       }));
@@ -215,6 +233,57 @@ export class PushNotificationService {
       return { success: true, messageId };
     } catch (err: any) {
       return { success: false, messageId: null, error: err?.message || String(err) };
+    }
+  }
+
+  async sendOtpNotification(tokens: string[], otp: string, phone: string): Promise<boolean> {
+    const validTokens = [...new Set(tokens)].filter(Boolean);
+    if (validTokens.length === 0) return false;
+
+    if (process.env.MOCK_SERVICES === 'true' || process.env.NODE_ENV === 'test') {
+      return true;
+    }
+
+    const messaging = getMessagingClient();
+    if (!messaging) return false;
+
+    const title = '🩸 RaktSetu — Verification Code';
+    const body = `Your 6-digit donor verification code is: ${otp}. Valid for 5 minutes.`;
+
+    try {
+      const messages: Message[] = validTokens.map((token) => ({
+        token,
+        notification: {
+          title,
+          body,
+        },
+        data: {
+          type: 'otp_verification',
+          otp,
+          phone,
+          title,
+          body,
+          tag: 'raktsetu-otp',
+        },
+        webpush: {
+          headers: { TTL: '300', Urgency: 'high' },
+          notification: {
+            title,
+            body,
+            icon: '/icons/icon-192x192.png',
+            badge: '/icons/icon-192x192.png',
+            requireInteraction: true,
+            tag: 'raktsetu-otp',
+          },
+        },
+      }));
+
+      await messaging.sendEach(messages);
+      console.log(`[@repo/api] FCM OTP push sent to ${validTokens.length} device(s)`);
+      return true;
+    } catch (err) {
+      console.warn('[@repo/api] Error dispatching OTP push notification:', err);
+      return false;
     }
   }
 }

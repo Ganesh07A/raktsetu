@@ -108,18 +108,39 @@ export default function DonorRegistrationPage() {
     setOtpLoading(true);
 
     try {
+      let fcmToken: string | undefined;
+      try {
+        fcmToken = localStorage.getItem('raktkhoj_fcm_token') || undefined;
+        if (!fcmToken && typeof window !== 'undefined' && 'Notification' in window) {
+          if (Notification.permission === 'default') {
+            await Notification.requestPermission();
+          }
+          if (Notification.permission === 'granted') {
+            const { getWebPushToken } = await import('../../../../src/lib/firebase-messaging');
+            fcmToken = await getWebPushToken().catch(() => undefined);
+            if (fcmToken) {
+              localStorage.setItem('raktkhoj_fcm_token', fcmToken);
+              localStorage.setItem('raktkhoj_fcm_enabled', 'true');
+            }
+          }
+        }
+      } catch {
+        // Fallback gracefully without FCM
+      }
+
       const res = await fetch(`${API_BASE}/api/v1/auth/otp/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           phone: `+91${phone.replace(/\D/g, '').slice(-10)}`,
           purpose: 'donor_registration',
+          fcmToken,
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to dispatch verification code');
+        throw new Error(data.error || (res.status >= 500 ? (isHi ? 'सर्वर अनुपलब्ध है। कृपया कुछ देर बाद प्रयास करें।' : 'Server temporarily unavailable. Please try again shortly.') : 'Failed to dispatch verification code'));
       }
 
       setOtpSent(true);
@@ -150,9 +171,9 @@ export default function DonorRegistrationPage() {
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.error || (isHi ? 'अमान्य OTP कोड' : 'Invalid OTP code'));
+        throw new Error(data.error || (res.status >= 500 ? (isHi ? 'सर्वर अनुपलब्ध है। कृपया कुछ देर बाद प्रयास करें।' : 'Server temporarily unavailable. Please try again shortly.') : (isHi ? 'अमान्य OTP कोड' : 'Invalid OTP code')));
       }
 
       setVerificationTicket(data.verificationTicket);
@@ -230,6 +251,19 @@ export default function DonorRegistrationPage() {
         localStorage.setItem('raktkhoj_donor_token', data.token || 'mock_token');
         localStorage.setItem('raktkhoj_donor_id', data.donor?.id || 'donor-1');
         localStorage.setItem('raktkhoj_donor_phone', `+91${phone}`);
+
+        // Automatically register FCM push subscription for the active donor
+        const activeFcm = localStorage.getItem('raktkhoj_fcm_token');
+        if (activeFcm && data.token) {
+          fetch(`${API_BASE}/api/v1/push/register`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${data.token}`,
+            },
+            body: JSON.stringify({ fcmToken: activeFcm }),
+          }).catch(() => {});
+        }
       }
     } catch (err: any) {
       setSubmitError(err.message || 'Error completing registration');
@@ -396,8 +430,9 @@ export default function DonorRegistrationPage() {
                       <label className="text-xs font-bold text-slate-700">
                         {isHi ? '6-अंकीय OTP कोड' : '6-Digit OTP Code'}
                       </label>
-                      <span className="text-[11px] text-slate-500">
-                        {isHi ? 'एसएमएस द्वारा भेजा गया कोड' : 'Code sent via SMS'}
+                      <span className="text-[11px] text-emerald-600 font-medium flex items-center gap-1">
+                        <Sparkles className="h-3 w-3" />
+                        {isHi ? 'पुश सूचना / एसएमएस द्वारा भेजा गया कोड' : 'Check Push Notification / SMS'}
                       </span>
                     </div>
                     <Input

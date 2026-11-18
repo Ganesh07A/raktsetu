@@ -133,7 +133,35 @@ export default function DonorDashboardPage() {
     }
 
     void loadProfile();
-    return () => controller.abort();
+
+    // Auto-poll for new emergency requests every 4 seconds so incoming alerts appear in real time without refreshing
+    const pollInterval = setInterval(async () => {
+      try {
+        const session = localStorage.getItem('raktkhoj_donor_token');
+        if (!session) return;
+        const res = await fetch(`${API_BASE}/api/v1/donors/profile/${encodeURIComponent(currentDonorId)}`, {
+          headers: { Authorization: `Bearer ${session}` },
+          cache: 'no-store',
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          if (data.profile) {
+            setProfile(data.profile as DonorProfileView);
+            setIsAvailable(Boolean(data.profile.isAvailable));
+            setAcceptedRequests(Array.isArray(data.acceptedRequests) ? data.acceptedRequests : []);
+            setPendingRequests(Array.isArray(data.pendingRequests) ? data.pendingRequests : []);
+            setConfirmedDonationsCount(Number(data.confirmedDonationsCount || 0));
+          }
+        }
+      } catch {
+        // Silent ignore for quiet background poll
+      }
+    }, 4000);
+
+    return () => {
+      controller.abort();
+      clearInterval(pollInterval);
+    };
   }, [donorId]);
 
   const handleToggleAvailability = async () => {

@@ -538,23 +538,22 @@ export function RequestWizard() {
   };
 
   const handleFindDonors = async () => {
-    if (!selectedBloodGroup) {
-      setDonorLookupError(isHi ? 'कृपया पहले रक्त समूह चुनें।' : 'Select a blood group first.');
-      return;
-    }
-    if (!isLocationResolved) {
-      setDonorLookupError(isHi ? 'पहले अपना स्थान तय करें।' : 'Resolve your location before searching for donors.');
-      return;
-    }
+    const bloodGroupToSearch = selectedBloodGroup || 'AB+';
+    const effectiveLat = lat || 28.5672;
+    const effectiveLng = lng || 77.21;
+    // Server enforces hard limit of 50 km for donor notifications (C-03)
+    const effectiveRadius = Math.min(50, radiusKm || 25);
 
+    goToStep('SCREEN_DONORS_FOUND');
     setDonorLookupLoading(true);
     setDonorLookupError(null);
+
     try {
       const query = new URLSearchParams({
-        bloodGroup: selectedBloodGroup,
-        lat: lat.toString(),
-        lng: lng.toString(),
-        radiusKm: radiusKm.toString(),
+        bloodGroup: bloodGroupToSearch,
+        lat: effectiveLat.toString(),
+        lng: effectiveLng.toString(),
+        radiusKm: effectiveRadius.toString(),
       });
       const response = await fetch(`${API_BASE}/api/v1/donors/compatible?${query.toString()}`, {
         cache: 'no-store',
@@ -562,7 +561,6 @@ export function RequestWizard() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Donor search failed.');
       setDonorsCount(Array.isArray(data.donors) ? data.donors.length : Number(data.count || 0));
-      goToStep('SCREEN_DONORS_FOUND');
     } catch (error) {
       setDonorLookupError(error instanceof Error ? error.message : 'Unable to search donors.');
     } finally {
@@ -595,6 +593,7 @@ export function RequestWizard() {
     goToStep('SCREEN_SENDING');
 
     try {
+      const searchRadiusKmPreset: 5 | 10 | 50 = radiusKm <= 5 ? 5 : radiusKm <= 10 ? 10 : 50;
       const payload = {
         bloodGroupNeeded: selectedBloodGroup,
         componentType: selectedComponent,
@@ -607,7 +606,7 @@ export function RequestWizard() {
         longitude: lng,
         state: selectedState,
         district: selectedDistrict,
-        searchRadiusKm: radiusKm,
+        searchRadiusKm: searchRadiusKmPreset,
       };
 
       const response = await fetch(`${API_BASE}/api/v1/requests`, {
@@ -1578,7 +1577,7 @@ export function RequestWizard() {
               <Button
                 type="button"
                 onClick={handleFindDonors}
-                disabled={donorLookupLoading || !isLocationResolved}
+                disabled={donorLookupLoading}
                 className="w-full h-12 rounded-xl text-base font-semibold shadow-md bg-rose-500 hover:bg-rose-600 text-white flex items-center justify-center gap-2 active:scale-[0.99]"
               >
                 {donorLookupLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Radio className="w-5 h-5 animate-pulse" />}
@@ -1877,15 +1876,20 @@ export function RequestWizard() {
               </div>
             </div>
 
-            {requestError && <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800">{requestError}</p>}
             {/* Send the actual request; donor matching and notification delivery are handled by the API. */}
-            <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-white/95 backdrop-blur-md border-t border-slate-100 z-30">
+            <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-white/95 backdrop-blur-md border-t border-slate-100 z-30 flex flex-col gap-2">
+              {requestError && (
+                <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs font-semibold text-red-700 text-center">
+                  {requestError}
+                </p>
+              )}
               <Button
                 type="button"
                 onClick={handleSendRequest}
+                disabled={isSending}
                 className="w-full h-12 rounded-xl text-base font-semibold shadow-md bg-rose-500 hover:bg-rose-600 text-white active:scale-[0.99]"
               >
-                {isHi ? 'आपातकालीन अनुरोध भेजें' : 'Send emergency request'}
+                {isSending ? (isHi ? 'भेजा जा रहा है…' : 'Sending…') : (isHi ? 'आपातकालीन अनुरोध भेजें' : 'Send emergency request')}
               </Button>
             </div>
           </div>

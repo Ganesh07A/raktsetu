@@ -76,6 +76,16 @@ export function rateLimiter(options: RateLimitOptions, store: MemoryRateLimitSto
       return next();
     }
 
+    // In local development, bypass rate limiting on loopback to prevent developer lockouts
+    const clientIp = getClientIp(c);
+    if (
+      process.env.NODE_ENV !== 'production' &&
+      c.req.header('x-enforce-rate-limit') !== 'true' &&
+      (clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === 'localhost')
+    ) {
+      return next();
+    }
+
     const key = await keyGenerator(c);
     let result: { count: number; resetAt: number };
     try {

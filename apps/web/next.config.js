@@ -33,10 +33,15 @@ const cspHeader = `
 const nextConfig = {
   transpilePackages: ['@repo/ui', '@repo/shared'],
   async rewrites() {
+    const backend =
+      process.env.NEXT_PUBLIC_API_BASE_URL ||
+      (isProduction
+        ? 'https://raktsetu-api-fsyx.onrender.com'
+        : 'http://localhost:3002');
     return [
       {
         source: '/api/v1/:path*',
-        destination: 'http://localhost:3002/api/v1/:path*',
+        destination: `${backend}/api/v1/:path*`,
       },
     ];
   },

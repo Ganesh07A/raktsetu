@@ -42,7 +42,7 @@ self.addEventListener('push', (event) => {
         tag: data.tag || notif.tag || `raktsetu-${data.requestId || 'alert'}`,
         requireInteraction: true,
         data: { responsePath },
-        actions: data.language === 'hi'
+        actions: data.type === 'otp_verification' ? [] : (data.language === 'hi'
           ? [
               { action: 'accept', title: 'मैं उपलब्ध हूँ' },
               { action: 'decline', title: 'अभी उपलब्ध नहीं' },
@@ -50,7 +50,7 @@ self.addEventListener('push', (event) => {
           : [
               { action: 'accept', title: "I'm available" },
               { action: 'decline', title: 'Not available' },
-            ],
+            ]),
       })
     );
   } catch (err) {
@@ -69,6 +69,10 @@ try {
     const messaging = firebase.messaging();
     messaging.onBackgroundMessage((payload) => {
       const data = payload.data || {};
+      // OTP verification alerts never have Accept/Decline donor buttons and are already handled by the native push listener
+      if (data.type === 'otp_verification') {
+        return;
+      }
       self.registration.showNotification(data.title || 'RaktSetu', {
         body: data.body || 'A nearby patient may need your help.',
         icon: data.icon || '/icons/icon-192x192.png',
@@ -94,8 +98,8 @@ try {
 }
 
 // apps/web/public/sw.js
-const STATIC_CACHE = 'raktkhoj-static-v1';
-const RUNTIME_CACHE = 'raktkhoj-runtime-v1';
+const STATIC_CACHE = 'raktkhoj-static-v3';
+const RUNTIME_CACHE = 'raktkhoj-runtime-v3';
 
 const PRECACHE_URLS = [
   '/',
@@ -143,8 +147,10 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
-  // 1. Bypass real-time API and external notification services
+  // 1. Bypass localhost development, real-time API, and external notification services
   if (
+    url.hostname === 'localhost' ||
+    url.hostname === '127.0.0.1' ||
     url.pathname.startsWith('/api') ||
     url.hostname.includes('supabase.co') ||
     url.hostname.includes('facebook.com')
