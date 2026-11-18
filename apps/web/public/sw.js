@@ -94,8 +94,8 @@ try {
 }
 
 // apps/web/public/sw.js
-const STATIC_CACHE = 'raktkhoj-static-v1';
-const RUNTIME_CACHE = 'raktkhoj-runtime-v1';
+const STATIC_CACHE = 'raktkhoj-static-v3';
+const RUNTIME_CACHE = 'raktkhoj-runtime-v3';
 
 const PRECACHE_URLS = [
   '/',
@@ -143,8 +143,10 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
-  // 1. Bypass real-time API and external notification services
+  // 1. Bypass localhost development, real-time API, and external notification services
   if (
+    url.hostname === 'localhost' ||
+    url.hostname === '127.0.0.1' ||
     url.pathname.startsWith('/api') ||
     url.hostname.includes('supabase.co') ||
     url.hostname.includes('facebook.com')
