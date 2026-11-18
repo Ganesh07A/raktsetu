@@ -1,5 +1,6 @@
 import { applicationDefault, cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getMessaging, type Message } from 'firebase-admin/messaging';
+import { existsSync, readFileSync } from 'node:fs';
 import { mockStore } from './mock-store';
 import { recordPushOutcome } from '../lib/telemetry';
 
@@ -27,6 +28,8 @@ function getMessagingClient() {
   try {
     const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
     const projectId = process.env.FIREBASE_PROJECT_ID;
+    const googleCredsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS?.replace(/\\/g, '/');
+
     const options = raw
       ? (() => {
           const serviceAccount = JSON.parse(raw);
@@ -35,8 +38,21 @@ function getMessagingClient() {
           }
           return { credential: cert(serviceAccount), ...(projectId ? { projectId } : {}) };
         })()
-      : process.env.GOOGLE_APPLICATION_CREDENTIALS
-        ? { credential: applicationDefault(), ...(projectId ? { projectId } : {}) }
+      : googleCredsPath
+        ? (() => {
+            try {
+              if (existsSync(googleCredsPath)) {
+                const creds = JSON.parse(readFileSync(googleCredsPath, 'utf8'));
+                if (creds.private_key) {
+                  creds.private_key = String(creds.private_key).replace(/\\n/g, '\n');
+                }
+                return { credential: cert(creds), ...(projectId ? { projectId } : {}) };
+              }
+            } catch (fsErr) {
+              console.warn('[@repo/api] Direct credentials read warning:', fsErr);
+            }
+            return { credential: applicationDefault(), ...(projectId ? { projectId } : {}) };
+          })()
         : null;
 
     if (!options) return null;
