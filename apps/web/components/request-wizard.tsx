@@ -593,6 +593,7 @@ export function RequestWizard() {
     goToStep('SCREEN_SENDING');
 
     try {
+      const searchRadiusKmPreset: 5 | 10 | 50 = radiusKm <= 5 ? 5 : radiusKm <= 10 ? 10 : 50;
       const payload = {
         bloodGroupNeeded: selectedBloodGroup,
         componentType: selectedComponent,
@@ -605,7 +606,7 @@ export function RequestWizard() {
         longitude: lng,
         state: selectedState,
         district: selectedDistrict,
-        searchRadiusKm: radiusKm,
+        searchRadiusKm: searchRadiusKmPreset,
       };
 
       const response = await fetch(`${API_BASE}/api/v1/requests`, {

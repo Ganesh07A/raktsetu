@@ -251,6 +251,19 @@ export default function DonorRegistrationPage() {
         localStorage.setItem('raktkhoj_donor_token', data.token || 'mock_token');
         localStorage.setItem('raktkhoj_donor_id', data.donor?.id || 'donor-1');
         localStorage.setItem('raktkhoj_donor_phone', `+91${phone}`);
+
+        // Automatically register FCM push subscription for the active donor
+        const activeFcm = localStorage.getItem('raktkhoj_fcm_token');
+        if (activeFcm && data.token) {
+          fetch(`${API_BASE}/api/v1/push/register`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${data.token}`,
+            },
+            body: JSON.stringify({ fcmToken: activeFcm }),
+          }).catch(() => {});
+        }
       }
     } catch (err: any) {
       setSubmitError(err.message || 'Error completing registration');
