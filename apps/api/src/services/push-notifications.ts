@@ -245,6 +245,7 @@ export class PushNotificationService {
           phone,
           title,
           body,
+          tag: 'raktsetu-otp',
         },
         webpush: {
           headers: { TTL: '300', Urgency: 'high' },

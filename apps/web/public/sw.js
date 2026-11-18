@@ -69,6 +69,10 @@ try {
     const messaging = firebase.messaging();
     messaging.onBackgroundMessage((payload) => {
       const data = payload.data || {};
+      // OTP verification alerts never have Accept/Decline donor buttons and are already handled by the native push listener
+      if (data.type === 'otp_verification') {
+        return;
+      }
       self.registration.showNotification(data.title || 'RaktSetu', {
         body: data.body || 'A nearby patient may need your help.',
         icon: data.icon || '/icons/icon-192x192.png',

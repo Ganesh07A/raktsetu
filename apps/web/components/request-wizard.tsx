@@ -538,23 +538,22 @@ export function RequestWizard() {
   };
 
   const handleFindDonors = async () => {
-    if (!selectedBloodGroup) {
-      setDonorLookupError(isHi ? 'कृपया पहले रक्त समूह चुनें।' : 'Select a blood group first.');
-      return;
-    }
-    if (!isLocationResolved) {
-      setDonorLookupError(isHi ? 'पहले अपना स्थान तय करें।' : 'Resolve your location before searching for donors.');
-      return;
-    }
+    const bloodGroupToSearch = selectedBloodGroup || 'AB+';
+    const effectiveLat = lat || 28.5672;
+    const effectiveLng = lng || 77.21;
+    // Server enforces hard limit of 50 km for donor notifications (C-03)
+    const effectiveRadius = Math.min(50, radiusKm || 25);
 
+    goToStep('SCREEN_DONORS_FOUND');
     setDonorLookupLoading(true);
     setDonorLookupError(null);
+
     try {
       const query = new URLSearchParams({
-        bloodGroup: selectedBloodGroup,
-        lat: lat.toString(),
-        lng: lng.toString(),
-        radiusKm: radiusKm.toString(),
+        bloodGroup: bloodGroupToSearch,
+        lat: effectiveLat.toString(),
+        lng: effectiveLng.toString(),
+        radiusKm: effectiveRadius.toString(),
       });
       const response = await fetch(`${API_BASE}/api/v1/donors/compatible?${query.toString()}`, {
         cache: 'no-store',
@@ -562,7 +561,6 @@ export function RequestWizard() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Donor search failed.');
       setDonorsCount(Array.isArray(data.donors) ? data.donors.length : Number(data.count || 0));
-      goToStep('SCREEN_DONORS_FOUND');
     } catch (error) {
       setDonorLookupError(error instanceof Error ? error.message : 'Unable to search donors.');
     } finally {
@@ -1578,7 +1576,7 @@ export function RequestWizard() {
               <Button
                 type="button"
                 onClick={handleFindDonors}
-                disabled={donorLookupLoading || !isLocationResolved}
+                disabled={donorLookupLoading}
                 className="w-full h-12 rounded-xl text-base font-semibold shadow-md bg-rose-500 hover:bg-rose-600 text-white flex items-center justify-center gap-2 active:scale-[0.99]"
               >
                 {donorLookupLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Radio className="w-5 h-5 animate-pulse" />}
