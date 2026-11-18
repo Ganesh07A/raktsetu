@@ -156,13 +156,13 @@ export const bloodSearchQuerySchema = z.object({
 export const donorRegistrationSchema = z.object({
   phone: phoneSchema,
   name: z.string().trim().min(2, 'Name must be at least 2 characters'),
-  email: z.string().trim().email().optional().or(z.literal('')),
+  email: z.string().trim().email().optional().or(z.literal('')).nullable(),
   bloodGroup: z.enum(BLOOD_GROUPS, { errorMap: () => ({ message: 'Invalid blood group' }) }),
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
   state: z.string().trim().min(1, 'State is required'),
   district: z.string().trim().min(1, 'District is required'),
-  city: z.string().trim().optional(),
+  city: z.string().trim().optional().nullable(),
   dateOfBirth: z
     .string()
     .trim()
@@ -173,13 +173,15 @@ export const donorRegistrationSchema = z.object({
     }, {
       message: `Donor age must be between ${MIN_DONOR_AGE} and ${MAX_DONOR_AGE} years`,
     })
-    .optional(),
-  gender: z.enum(['male', 'female', 'other']).optional(),
+    .optional()
+    .nullable(),
+  gender: z.enum(['male', 'female', 'other']).optional().nullable(),
   weightKg: z
     .number()
     .min(MIN_DONOR_WEIGHT_KG, `Minimum weight for donation is ${MIN_DONOR_WEIGHT_KG} kg`)
     .max(MAX_DONOR_WEIGHT_KG)
-    .optional(),
+    .optional()
+    .nullable(),
   lastDonationDate: z
     .string()
     .trim()
@@ -187,11 +189,12 @@ export const donorRegistrationSchema = z.object({
     .refine((d) => new Date(d).getTime() <= Date.now(), {
       message: 'Last donation date cannot be in the future',
     })
-    .optional(),
+    .optional()
+    .nullable(),
   isAvailable: z.boolean().default(true),
   searchRadiusKm: z.number().min(1).max(50, 'Search radius cannot exceed 50 km').default(10),
   preferredLanguage: z.enum(SUPPORTED_LANGUAGES).default('en'),
-  verificationTicket: z.string().optional(),
+  verificationTicket: z.string().optional().nullable(),
 });
 
 export const createBloodRequestSchema = z.object({

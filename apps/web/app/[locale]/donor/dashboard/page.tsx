@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { PushNotificationOptIn } from '../../../components/push-notification-opt-in';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3002';
+const API_BASE = typeof window !== 'undefined' ? '' : (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3002');
 
 type DonorProfileView = {
   id: string;
@@ -74,6 +74,17 @@ export default function DonorDashboardPage() {
   const [profileError, setProfileError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      const loginDonor = searchParams.get('loginDonor');
+      const token = searchParams.get('token');
+      if (loginDonor && token) {
+        localStorage.setItem('raktkhoj_donor_id', loginDonor);
+        localStorage.setItem('raktkhoj_donor_token', token);
+        setDonorId(loginDonor);
+        return;
+      }
+    }
     const storedId = localStorage.getItem('raktkhoj_donor_id');
     if (storedId) {
       setDonorId(storedId);

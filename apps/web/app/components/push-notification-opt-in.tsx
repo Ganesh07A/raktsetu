@@ -4,7 +4,7 @@ import * as React from 'react';
 import { Bell, BellOff, CheckCircle2, AlertCircle } from 'lucide-react';
 import { getWebPushToken, removeWebPushToken } from '../../src/lib/firebase-messaging';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3002';
+const API_BASE = typeof window !== 'undefined' ? '' : (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3002');
 
 export function PushNotificationOptIn() {
   const [enabled, setEnabled] = React.useState(false);

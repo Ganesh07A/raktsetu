@@ -30,7 +30,7 @@ import {
   type Gender,
 } from '@repo/shared';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3002';
+const API_BASE = typeof window !== 'undefined' ? '' : (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3002');
 
 const STEPS_EN: StepItem[] = [
   { title: 'Mobile & OTP', description: 'Verification' },
@@ -200,10 +200,10 @@ export default function DonorRegistrationPage() {
       longitude,
       state,
       district,
-      gender,
-      weightKg: Number(weightKg),
-      dateOfBirth,
-      lastDonationDate: lastDonationDate || null,
+      gender: gender || undefined,
+      weightKg: weightKg ? Number(weightKg) : undefined,
+      dateOfBirth: dateOfBirth || undefined,
+      lastDonationDate: lastDonationDate || undefined,
       isAvailable,
       searchRadiusKm,
       preferredLanguage: locale as 'en' | 'hi',

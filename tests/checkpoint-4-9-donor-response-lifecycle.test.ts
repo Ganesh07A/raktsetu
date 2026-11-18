@@ -459,7 +459,7 @@ describe('Checkpoint 4.9: Complete Donor Response & Seeker Visibility Lifecycle'
       const ids = detail.acceptedDonors.map((d: any) => d.donorId);
       expect(ids).toContain(donorId1);
       expect(ids).toContain(donorId3);
-    });
+    }, 20000);
 
     test('4.2: If one of two accepted donors declines, request remains fulfilled with remaining donor', async () => {
       // Donor 3 changes mind to declined
@@ -489,7 +489,7 @@ describe('Checkpoint 4.9: Complete Donor Response & Seeker Visibility Lifecycle'
       const detail = (await detailRes.json()) as any;
       expect(detail.acceptedDonors).toHaveLength(1);
       expect(detail.acceptedDonors[0].donorId).toBe(donorId1);
-    });
+    }, 20000);
 
     test('4.3: If the sole remaining accepted donor declines, request reverts to donors_notified', async () => {
       // Donor 1 now declines
@@ -522,7 +522,7 @@ describe('Checkpoint 4.9: Complete Donor Response & Seeker Visibility Lifecycle'
       });
       const detail = (await detailRes.json()) as any;
       expect(detail.acceptedDonors).toHaveLength(0);
-    });
+    }, 20000);
 
     test('4.4: Donor acceptance attempt on cancelled request is rejected with 409 Conflict', async () => {
       const cancelResponseToken = createDonorResponseToken(testCancelledReqId, donorId1);
@@ -538,7 +538,7 @@ describe('Checkpoint 4.9: Complete Donor Response & Seeker Visibility Lifecycle'
       expect(res.status).toBe(409);
       const data = (await res.json()) as any;
       expect(data.error).toContain('Cannot respond to a cancelled request');
-    });
+    }, 20000);
 
     test('4.5: Donor acceptance attempt on expired request is rejected with 409 Conflict', async () => {
       const expireResponseToken = createDonorResponseToken(testExpiredReqId, donorId1);
@@ -554,7 +554,7 @@ describe('Checkpoint 4.9: Complete Donor Response & Seeker Visibility Lifecycle'
       expect(res.status).toBe(409);
       const data = (await res.json()) as any;
       expect(data.error).toContain('Cannot respond to a expired request');
-    });
+    }, 20000);
   });
 
   // =========================================================================

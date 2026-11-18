@@ -75,7 +75,7 @@ const CONDITION_TAGS = [
 
 import { type NearbyHospital, getHospitalsForDistrict } from './regional-hospitals';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3002';
+const API_BASE = typeof window !== 'undefined' ? '' : (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3002');
 const NOMINATIM_CACHE_PREFIX = 'raktkhoj-geocode-v1:';
 let lastNominatimLookup = 0;
 

@@ -34,6 +34,17 @@ const BLOOD_GROUPS = [
 export default function HomePage() {
   const locale = useLocale();
   const isHi = locale === 'hi';
+  const [isDonor, setIsDonor] = React.useState(false);
+
+  React.useEffect(() => {
+    try {
+      if (localStorage.getItem('raktkhoj_donor_token') && localStorage.getItem('raktkhoj_donor_id')) {
+        setIsDonor(true);
+      }
+    } catch {
+      setIsDonor(false);
+    }
+  }, []);
 
   return (
     <div className="space-y-12 sm:space-y-16">
@@ -83,17 +94,31 @@ export default function HomePage() {
               </Link>
             </Button>
 
-            <Button
-              asChild
-              size="lg"
-              variant="outline"
-              className="border-white/40 bg-red-800/40 hover:bg-red-800/70 text-white font-semibold text-base h-12 px-6 backdrop-blur-xs"
-            >
-              <Link href="/donor/register" className="flex items-center gap-2">
-                <UserPlus className="h-5 w-5 text-red-200" />
-                <span>{isHi ? 'रक्तदाता बनें' : 'Register as Donor'}</span>
-              </Link>
-            </Button>
+            {isDonor ? (
+              <Button
+                asChild
+                size="lg"
+                variant="outline"
+                className="border-white/40 bg-red-900/50 hover:bg-red-900/80 text-white font-semibold text-base h-12 px-6 backdrop-blur-xs"
+              >
+                <Link href="/donor/dashboard" className="flex items-center gap-2">
+                  <Activity className="h-5 w-5 text-red-200" />
+                  <span>{isHi ? 'दाता डैशबोर्ड' : 'Donor Dashboard'}</span>
+                </Link>
+              </Button>
+            ) : (
+              <Button
+                asChild
+                size="lg"
+                variant="outline"
+                className="border-white/40 bg-red-800/40 hover:bg-red-800/70 text-white font-semibold text-base h-12 px-6 backdrop-blur-xs"
+              >
+                <Link href="/donor/register" className="flex items-center gap-2">
+                  <UserPlus className="h-5 w-5 text-red-200" />
+                  <span>{isHi ? 'रक्तदाता बनें' : 'Register as Donor'}</span>
+                </Link>
+              </Button>
+            )}
           </div>
         </div>
       </section>

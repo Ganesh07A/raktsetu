@@ -34,7 +34,7 @@ import {
   type ComponentType,
 } from '@repo/shared';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3002';
+const API_BASE = typeof window !== 'undefined' ? '' : (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3002');
 
 export default function SearchResultsPage() {
   const locale = useLocale();
