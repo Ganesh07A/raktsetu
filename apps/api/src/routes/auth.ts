@@ -64,8 +64,8 @@ authRoutes.post('/otp/send', otpSendRateLimit, async (c) => {
     );
   }
 
-  const { phone, purpose } = parseResult.data;
-  const result = await otpService.sendOtp(phone, purpose);
+  const { phone, purpose, fcmToken } = parseResult.data;
+  const result = await otpService.sendOtp(phone, purpose, fcmToken);
 
   if (!result.success) {
     const status = result.error === 'COOLDOWN_ACTIVE' ? 429 : 503;

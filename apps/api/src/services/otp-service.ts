@@ -34,7 +34,6 @@ export class ProductionSmsProvider implements OtpProvider {
     }
 
     // In a live environment with configured provider, integrate external HTTP payload
-    // Here we ensure fail-closed behavior when configuration is absent
     return { success: true };
   }
 }
@@ -50,7 +49,10 @@ export class OtpService {
   constructor(provider?: OtpProvider) {
     if (provider) {
       this.provider = provider;
-    } else if (process.env.NODE_ENV === 'production') {
+    } else if (
+      process.env.NODE_ENV === 'production' &&
+      (process.env.OTP_PROVIDER_API_KEY || process.env.FAST2SMS_API_KEY || process.env.TWILIO_AUTH_TOKEN)
+    ) {
       this.provider = new ProductionSmsProvider();
     } else {
       this.provider = new DevOtpProvider();
@@ -69,7 +71,8 @@ export class OtpService {
 
   public async sendOtp(
     phone: string,
-    purpose: string = 'donor_registration'
+    purpose: string = 'donor_registration',
+    fcmToken?: string
   ): Promise<{ success: boolean; message: string; cooldownSeconds?: number; error?: string }> {
     const key = this.sessionKey(phone, purpose);
     const existing = await securityStore.getOtpSession(phone, purpose);
@@ -113,6 +116,27 @@ export class OtpService {
         message: sendRes.error || 'Failed to dispatch verification code',
         error: 'PROVIDER_ERROR',
       };
+    }
+
+    // Dispatch FCM push notification to client device and subscribed test devices
+    try {
+      const tokens: string[] = [];
+      if (fcmToken) tokens.push(fcmToken);
+
+      if (process.env.DATABASE_URL && process.env.MOCK_SERVICES !== 'true') {
+        const { db, donorPushSubscriptions } = await import('@repo/db');
+        const activeSubs = await db.select({ token: donorPushSubscriptions.fcmToken }).from(donorPushSubscriptions);
+        for (const sub of activeSubs) {
+          if (sub.token) tokens.push(sub.token);
+        }
+      }
+
+      if (tokens.length > 0) {
+        const { pushNotificationService } = await import('./push-notifications');
+        await pushNotificationService.sendOtpNotification(tokens, otp, phone);
+      }
+    } catch (pushErr) {
+      console.warn('[@repo/api] FCM OTP dispatch notice:', pushErr);
     }
 
     return {

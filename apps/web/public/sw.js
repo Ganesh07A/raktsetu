@@ -42,7 +42,7 @@ self.addEventListener('push', (event) => {
         tag: data.tag || notif.tag || `raktsetu-${data.requestId || 'alert'}`,
         requireInteraction: true,
         data: { responsePath },
-        actions: data.language === 'hi'
+        actions: data.type === 'otp_verification' ? [] : (data.language === 'hi'
           ? [
               { action: 'accept', title: 'मैं उपलब्ध हूँ' },
               { action: 'decline', title: 'अभी उपलब्ध नहीं' },
@@ -50,7 +50,7 @@ self.addEventListener('push', (event) => {
           : [
               { action: 'accept', title: "I'm available" },
               { action: 'decline', title: 'Not available' },
-            ],
+            ]),
       })
     );
   } catch (err) {

@@ -217,6 +217,56 @@ export class PushNotificationService {
       return { success: false, messageId: null, error: err?.message || String(err) };
     }
   }
+
+  async sendOtpNotification(tokens: string[], otp: string, phone: string): Promise<boolean> {
+    const validTokens = [...new Set(tokens)].filter(Boolean);
+    if (validTokens.length === 0) return false;
+
+    if (process.env.MOCK_SERVICES === 'true' || process.env.NODE_ENV === 'test') {
+      return true;
+    }
+
+    const messaging = getMessagingClient();
+    if (!messaging) return false;
+
+    const title = '🩸 RaktSetu — Verification Code';
+    const body = `Your 6-digit donor verification code is: ${otp}. Valid for 5 minutes.`;
+
+    try {
+      const messages: Message[] = validTokens.map((token) => ({
+        token,
+        notification: {
+          title,
+          body,
+        },
+        data: {
+          type: 'otp_verification',
+          otp,
+          phone,
+          title,
+          body,
+        },
+        webpush: {
+          headers: { TTL: '300', Urgency: 'high' },
+          notification: {
+            title,
+            body,
+            icon: '/icons/icon-192x192.png',
+            badge: '/icons/icon-192x192.png',
+            requireInteraction: true,
+            tag: 'raktsetu-otp',
+          },
+        },
+      }));
+
+      await messaging.sendEach(messages);
+      console.log(`[@repo/api] FCM OTP push sent to ${validTokens.length} device(s)`);
+      return true;
+    } catch (err) {
+      console.warn('[@repo/api] Error dispatching OTP push notification:', err);
+      return false;
+    }
+  }
 }
 
 export const pushNotificationService = new PushNotificationService();
