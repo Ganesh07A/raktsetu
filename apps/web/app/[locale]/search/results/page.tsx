@@ -389,14 +389,29 @@ export default function SearchResultsPage() {
                           )}
                         </div>
                         <p className="text-xs text-slate-600">{bank.address}</p>
+                        {bank.phone ? (
+                          <p className="text-xs font-semibold text-slate-700 mt-0.5 flex items-center gap-1.5">
+                            <PhoneCall className="h-3 w-3 text-red-600 shrink-0" />
+                            <span className="font-mono">{bank.phone}</span>
+                          </p>
+                        ) : (
+                          <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5">
+                            <PhoneCall className="h-3 w-3 text-slate-400 shrink-0" />
+                            <span>{isHi ? 'हेल्पलाइन: 104 / 1910' : 'Helpline: 104 / 1910'}</span>
+                          </p>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
                         <Badge
-                          variant="destructive"
+                          variant={availableUnits > 0 ? "success" : bank.stock && bank.stock.length > 0 ? "destructive" : "outline"}
                           className="text-xs font-bold px-2.5 py-1"
                         >
-                          {availableUnits} {isHi ? 'यूनिट उपलब्ध' : 'Units Available'}
+                          {availableUnits > 0
+                            ? `${availableUnits} ${isHi ? 'यूनिट उपलब्ध' : 'Units Available'}`
+                            : bank.stock && bank.stock.length > 0
+                            ? (isHi ? 'स्टॉक समाप्त' : 'Out of Stock')
+                            : (isHi ? 'स्टॉक अनिर्धारित' : 'Stock Unconfirmed')}
                         </Badge>
                         <Badge variant="outline" className="text-xs font-semibold text-slate-700">
                           {bank.distanceKm !== null ? `${bank.distanceKm.toFixed(1)} km` : (isHi ? 'दूरी उपलब्ध नहीं' : 'Distance unavailable')}
@@ -427,13 +442,21 @@ export default function SearchResultsPage() {
 
                     {/* Direct Contact Actions */}
                     <div className="flex flex-wrap items-center gap-2 pt-2">
-                      {bank.phone && (
+                      {bank.phone ? (
                         <a
                           href={`tel:${bank.phone}`}
                           className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold text-xs shadow-xs active:scale-95 transition-all"
                         >
                           <PhoneCall className="h-3.5 w-3.5 fill-current" />
-                          <span>{isHi ? 'ब्लड बैंक को कॉल करें' : 'Call Blood Bank'} ({bank.phone})</span>
+                          <span>{isHi ? 'कॉल करें' : 'Call'} ({bank.phone})</span>
+                        </a>
+                      ) : (
+                        <a
+                          href="tel:104"
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs active:scale-95 transition-all"
+                        >
+                          <PhoneCall className="h-3.5 w-3.5 fill-current" />
+                          <span>{isHi ? 'हेल्पलाइन कॉल करें (104)' : 'Call Blood Helpline (104)'}</span>
                         </a>
                       )}
 

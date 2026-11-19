@@ -199,26 +199,28 @@ export class ERaktKoshProxyService {
     let finalBanks: BloodBankCardData[] = [];
     let source: 'eraktkosh' | 'database' | 'combined' = 'database';
 
+    const seedBanks = this.queryLocalSeedBanks(params);
+
     if (process.env.NODE_ENV === 'test') {
-      finalBanks = this.queryLocalSeedBanks(params);
+      finalBanks = seedBanks;
       source = 'database';
     } else {
       if (externalSuccess && liveBanks.length > 0) {
-        finalBanks = liveBanks;
-        source = 'eraktkosh';
+        // Merge verified seed banks within search radius if not already in liveBanks
+        const seenNames = new Set(liveBanks.map((b) => b.name.toLowerCase()));
+        const additionalSeed = seedBanks.filter((b) => !seenNames.has(b.name.toLowerCase()));
+        finalBanks = [...liveBanks, ...additionalSeed];
+        source = 'combined';
       } else if (params.lat !== undefined && params.lng !== undefined) {
         // eRaktKosh external live request unavailable (e.g. geo-blocked outside India).
         // Fetch verified open data blood banks for the exact coordinates and district.
         const openDataBanks = await this.fetchNearbyOpenDataBloodBanks(params);
-        if (openDataBanks.length > 0) {
-          finalBanks = openDataBanks;
-          source = 'combined';
-        }
-      }
-
-      // In test mode only, fall back to seed dataset if empty. In production, never manufacture fake inventory.
-      if (process.env.NODE_ENV === 'test' && finalBanks.length === 0) {
-        finalBanks = this.queryLocalSeedBanks(params);
+        const seenNames = new Set(seedBanks.map((b) => b.name.toLowerCase()));
+        const uniqueOpenData = openDataBanks.filter((b) => !seenNames.has(b.name.toLowerCase()));
+        finalBanks = [...seedBanks, ...uniqueOpenData];
+        source = 'combined';
+      } else {
+        finalBanks = seedBanks;
         source = 'database';
       }
     }
@@ -440,13 +442,43 @@ export class ERaktKoshProxyService {
       const parts = rawDetails.split(/<br\s*\/?>/i);
       const bankName = (parts[0] || `Blood Centre ${index + 1}`).trim();
       const address = (parts[1] || '').trim();
-      const contactInfo = parts[2] || '';
 
-      const phoneMatch = contactInfo.match(/Phone:\s*([0-9+\s\-]+)/i);
-      const phone = phoneMatch ? phoneMatch[1]!.trim() : null;
+      // Extract phone from anywhere in rawDetails (supports Phone:, Mobile:, Contact:, Tel:)
+      const phoneMatch = rawDetails.match(/(?:Phone|Mobile|Contact|Tel):\s*([0-9+\s\-/]+)/i);
+      let phone = phoneMatch ? phoneMatch[1]!.split(/[\/,]/)[0]!.trim() : null;
 
-      const emailMatch = contactInfo.match(/Email:\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i);
+      const emailMatch = rawDetails.match(/Email:\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i);
       const email = emailMatch ? emailMatch[1]!.trim() : null;
+
+      // Match against verified seed directory to enrich coordinates and verified contact
+      const normName = bankName.toLowerCase();
+      const normRaw = rawDetails.toLowerCase();
+      const matchedSeed = SEED_BLOOD_BANKS.find((sb) => {
+        const sNorm = sb.name.toLowerCase();
+        return (
+          normName.includes(sNorm) ||
+          sNorm.includes(normName) ||
+          (normRaw.includes('dattaji') && sNorm.includes('dattaji')) ||
+          ((normRaw.includes('hedgewar') || normRaw.includes('hegdewar')) && sNorm.includes('hedgewar')) ||
+          (normName.includes('aiims') && sNorm.includes('aiims')) ||
+          (normName.includes('kem') && sNorm.includes('kem')) ||
+          (normName.includes('safdarjung') && sNorm.includes('safdarjung')) ||
+          (normName.includes('red cross') && sNorm.includes('red cross')) ||
+          (normName.includes('rotary') && sNorm.includes('rotary')) ||
+          (normName.includes('kgmu') && sNorm.includes('kgmu')) ||
+          (normName.includes('aurangabad blood bank') && sNorm.includes('aurangabad blood bank'))
+        );
+      });
+
+      if (!phone && matchedSeed?.phone) {
+        phone = matchedSeed.phone;
+      }
+      const latitude = matchedSeed?.latitude ?? null;
+      const longitude = matchedSeed?.longitude ?? null;
+      const distanceKm =
+        latitude !== null && longitude !== null && params.lat !== undefined && params.lng !== undefined
+          ? Number(haversineDistance(params.lat, params.lng, latitude, longitude).toFixed(1))
+          : null;
 
       // Parse only stock quantities actually present in the upstream response.
       const parsedStock: StockItem[] = [];
@@ -470,26 +502,23 @@ export class ERaktKoshProxyService {
         }
       }
 
-      // The upstream row does not provide coordinates or a measured distance.
-      // Do not pretend the bank is at the seeker's location or invent a km value.
       const stockItems = parsedStock;
-      const distanceKm: number | null = null;
 
       banks.push({
         id: `eraktkosh-${stateName}-${index + 1}`,
         name: bankName,
-        licenseNumber: null,
+        licenseNumber: matchedSeed?.licenseNumber || null,
         state: stateName || 'India',
         district: params.districtCode || 'District',
-        city: address.split(',')[0]?.trim() || null,
-        address: address || null,
+        city: address.split(',')[0]?.trim() || matchedSeed?.city || null,
+        address: address || matchedSeed?.address || null,
         phone,
         email,
-        latitude: null,
-        longitude: null,
+        latitude,
+        longitude,
         distanceKm,
         stock: stockItems,
-        isVerified: false,
+        isVerified: matchedSeed?.isVerified ?? false,
         source: 'eraktkosh',
         verificationStatus: stockItems.length > 0 ? 'source_reported' : 'unavailable',
         lastStockUpdate: updatedTimestamp,

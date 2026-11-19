@@ -1515,15 +1515,39 @@ export function RequestWizard() {
                       <p className="text-xs text-slate-500 mt-0.5">
                         {bankLocation} · <span className="font-semibold text-rose-600">{measuredDistance}</span>
                       </p>
+                      {bankPhone ? (
+                        <p className="text-xs font-semibold text-slate-700 mt-1 flex items-center gap-1.5">
+                          <Phone className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                          <span className="font-mono">{bankPhone}</span>
+                        </p>
+                      ) : (
+                        <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
+                          <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span>{isHi ? 'हेल्पलाइन: 104 / 1910' : 'Helpline: 104 / 1910'}</span>
+                        </p>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-medium">
                         {bank.source || 'Blood Bank'}
                       </span>
-                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold">
-                        {units} {isHi ? 'यूनिट उपलब्ध' : 'units available'}
-                      </span>
+                      {units > 0 ? (
+                        <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                          {units} {isHi ? 'यूनिट उपलब्ध' : 'units available'}
+                        </span>
+                      ) : bank.stock && bank.stock.length > 0 ? (
+                        <span className="px-2.5 py-0.5 rounded-full bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block" />
+                          {isHi ? 'स्टॉक समाप्त (Out of stock)' : 'Out of stock'}
+                        </span>
+                      ) : (
+                        <span className="px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-xs font-semibold flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />
+                          {isHi ? 'स्टॉक अनिर्धारित · कॉल कर पुष्टि करें' : 'Stock unconfirmed · Call to verify'}
+                        </span>
+                      )}
                       <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-semibold">
                         {selectedBloodGroup || 'AB+'} · {selectedComponent}
                       </span>
@@ -1554,15 +1578,17 @@ export function RequestWizard() {
                         </a>
                       )}
 
-                      {bankPhone && (
-                        <a
-                          href={`tel:${bankPhone}`}
-                          className="flex-1 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center gap-2 text-slate-800 text-sm font-semibold transition-colors shadow-xs"
-                        >
-                          <Phone className="w-4 h-4 text-slate-700" />
-                          <span>{isHi ? 'कॉल करें' : 'Call'}</span>
-                        </a>
-                      )}
+                      <a
+                        href={`tel:${bankPhone || '104'}`}
+                        className="flex-1 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center gap-2 text-slate-800 text-sm font-semibold transition-colors shadow-xs"
+                      >
+                        <Phone className="w-4 h-4 text-emerald-600" />
+                        <span>
+                          {bankPhone
+                            ? (isHi ? `कॉल करें: ${bankPhone}` : `Call ${bankPhone}`)
+                            : (isHi ? 'हेल्पलाइन कॉल करें (104)' : 'Call Helpline (104)')}
+                        </span>
+                      </a>
                     </div>
                   </div>
                 );
