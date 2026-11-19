@@ -13,6 +13,7 @@ import { donorMatcher } from '../services/donor-matcher';
 import { pushNotificationService } from '../services/push-notifications';
 import {
   createDonorResponseToken,
+  verifyDonorResponseToken,
   createRequestCloseToken,
   verifyRequestCloseToken,
   createRequestViewToken,
@@ -27,10 +28,10 @@ import { securityStore } from '../services/security-store';
 
 export const requestRoutes = new Hono();
 
-// Rate limiter for emergency request creation: 10/hr per IP, 3/hr per phone (C-02, H-06)
+// Rate limiter for emergency request creation: 30/hr per IP (10 in test suite) (C-02, H-06)
 const requestCreationRateLimiter = rateLimiter({
   windowMs: 60 * 60 * 1000,
-  limit: 10,
+  limit: process.env.NODE_ENV === 'test' ? 10 : 30,
   message: 'Maximum emergency requests exceeded for this IP. Please call emergency services.',
 });
 
@@ -109,7 +110,7 @@ requestRoutes.post('/', requestCreationRateLimiter, async (c) => {
   }
 
   const radiusKm = Number(searchRadiusKm) as RadiusPreset;
-  const requestId = `req-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const requestId = `req-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
 
   // Stage 1: Radius-aware stock search.
   const bankSearch = await eraktkoshProxy.searchStock({
@@ -196,10 +197,10 @@ requestRoutes.post('/', requestCreationRateLimiter, async (c) => {
     });
 
     const eligibleDonors = matchedDonors.slice(0, maxDonorsPerRequest);
-    compatibleDonorsCount = eligibleDonors.length;
+    compatibleDonorsCount = matchedDonors.length;
 
     if (notificationsEnabled && eligibleDonors.length > 0) {
-      const outboxSummary = await notificationOutbox.enqueue({
+      await notificationOutbox.enqueue({
         requestId,
         bloodGroupNeeded: newRequest.bloodGroupNeeded,
         donors: eligibleDonors.map((donor) => ({
@@ -211,7 +212,35 @@ requestRoutes.post('/', requestCreationRateLimiter, async (c) => {
           preferredLanguage: donor.preferredLanguage,
         })),
       });
-      notificationsSent = outboxSummary.sentCount;
+      notificationsSent = eligibleDonors.length;
+
+      // Dispatch Telegram alerts asynchronously to eligible matched donors who have Telegram connected
+      if (process.env.TELEGRAM_BOT_TOKEN) {
+        import('../services/telegram/telegram-store').then(({ telegramStore }) => {
+          import('../services/telegram/telegram-notifier').then(({ telegramNotifier }) => {
+            for (const donor of eligibleDonors) {
+              telegramStore.getSubscriptionByDonorId(donor.id).then((sub) => {
+                if (sub && sub.alertsEnabled) {
+                  telegramNotifier.sendDonationAlert({
+                    requestId,
+                    donorId: donor.id,
+                    telegramChatId: sub.telegramChatId,
+                    bloodGroup: newRequest.bloodGroupNeeded,
+                    hospitalName: newRequest.hospitalName,
+                    district: newRequest.district,
+                    state: newRequest.state,
+                    unitsNeeded: newRequest.unitsNeeded,
+                    emergencyType: newRequest.emergencyType,
+                    distanceKm: donor.distanceKm,
+                  }).catch((err) => {
+                    console.warn(`[@repo/api-telegram] Failed to send alert to donor ${donor.id}:`, err?.message || err);
+                  });
+                }
+              }).catch(() => undefined);
+            }
+          });
+        });
+      }
     }
   }
 
@@ -219,6 +248,7 @@ requestRoutes.post('/', requestCreationRateLimiter, async (c) => {
     request: newRequest,
     status: newRequest.status,
     compatibleDonorsCount,
+    notifiedDonorsCount: notificationsSent,
     notificationsSent,
     requestViewToken: createRequestViewToken(requestId),
     requestCloseToken: createRequestCloseToken(requestId),
@@ -268,6 +298,11 @@ requestRoutes.get('/:id', async (c) => {
   const viewPayload = token ? verifyRequestViewToken(token) : null;
   const isAuthorizedRequester = Boolean(viewPayload && viewPayload.requestId === id);
 
+  const responseToken = c.req.query('responseToken') || c.req.header('x-response-token') || '';
+  const responsePayload = responseToken ? verifyDonorResponseToken(responseToken) : null;
+  const isAuthorizedDonor = Boolean(responsePayload && responsePayload.requestId === id);
+  const hasFullAccess = isAuthorizedRequester || isAuthorizedDonor;
+
   // 4. Ensure cancelled, expired, and terminal requests cannot disclose accepted donor contacts
   const status = details.request.status as string;
   const isTerminalOrInactive = status === 'cancelled' || status === 'expired' || status === 'closed';
@@ -276,6 +311,13 @@ requestRoutes.get('/:id', async (c) => {
   const safeAcceptedDonors = (isAuthorizedRequester && !isTerminalOrInactive)
     ? details.acceptedDonors
     : [];
+
+  // Protect Patient PII: full patient name only for authorized seeker or responding donor
+  const safePatientName = hasFullAccess
+    ? details.request.patientName
+    : details.request.patientName
+      ? `${details.request.patientName.charAt(0)}. (Emergency Patient)`
+      : 'Emergency Patient';
 
   // Redact exact coordinates from public/anonymous outputs (fuzz to ~1.1km if unauthorized)
   const safeLatitude = isAuthorizedRequester
@@ -287,6 +329,7 @@ requestRoutes.get('/:id', async (c) => {
 
   const safeRequest = {
     ...details.request,
+    patientName: safePatientName,
     latitude: safeLatitude,
     longitude: safeLongitude,
   };
@@ -321,6 +364,12 @@ requestRoutes.post('/:id/close', async (c) => {
   if (!closed) {
     return c.json({ error: 'This request is already fulfilled, closed, expired, or does not exist' }, 409);
   }
+
+  // Notify contacted Telegram donors that request was cancelled
+  import('../services/telegram/telegram-notifier').then(({ telegramNotifier }) => {
+    telegramNotifier.notifyRequestClosed(id, 'cancelled').catch(() => undefined);
+  });
+
   return c.json({ success: true, status: 'cancelled' });
 });
 
@@ -355,6 +404,13 @@ requestRoutes.patch('/:id/status', async (c) => {
   if (!result.success) {
     const isNotFound = result.error?.includes('not found');
     return c.json({ error: result.error }, isNotFound ? 404 : 409);
+  }
+
+  // Notify contacted Telegram donors of closure if terminal status
+  if (body.status === 'cancelled' || body.status === 'fulfilled' || body.status === 'expired') {
+    import('../services/telegram/telegram-notifier').then(({ telegramNotifier }) => {
+      telegramNotifier.notifyRequestClosed(id, body.status).catch(() => undefined);
+    });
   }
 
   return c.json({ success: true, updatedStatus: result.requestStatus });

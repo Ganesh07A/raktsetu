@@ -87,6 +87,33 @@ bloodBankRoutes.get('/search', async (c) => {
     );
   }
 
+  // Auto-resolve state & district from coordinates if not provided (ensures eRaktKosh live lookup succeeds)
+  let resolvedState = state;
+  let resolvedDistrict = district;
+
+  if ((!resolvedState || !resolvedDistrict) && !isNaN(lat) && !isNaN(lng)) {
+    try {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 2000);
+      const revRes = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`,
+        { signal: controller.signal, headers: { 'User-Agent': 'RaktSetu/1.0' } }
+      );
+      clearTimeout(tid);
+      if (revRes.ok) {
+        const revData = await revRes.json();
+        const addr = revData.address || {};
+        if (!resolvedState && addr.state) resolvedState = addr.state;
+        if (!resolvedDistrict) {
+          resolvedDistrict =
+            addr.state_district || addr.county || addr.city || addr.town || addr.district;
+        }
+      }
+    } catch {
+      // Continue with whatever is available
+    }
+  }
+
   // Query stock using resilient eRaktKosh proxy service (24h daily cache)
   const proxyResult = await eraktkoshProxy.searchStock({
     lat,
@@ -94,11 +121,13 @@ bloodBankRoutes.get('/search', async (c) => {
     radiusKm,
     bloodGroup,
     componentType: componentType as any,
-    stateCode: state,
-    districtCode: district,
+    stateCode: resolvedState,
+    districtCode: resolvedDistrict,
   });
 
-  let matchedBanks = proxyResult.banks;
+  let matchedBanks = (proxyResult.banks || []).filter(
+    (b) => b.distanceKm === null || b.distanceKm <= radiusKm
+  );
 
   // Seed/in-memory fixtures are test-only. Live users must never receive demo hospitals.
   if (process.env.NODE_ENV === 'test' && (!matchedBanks || matchedBanks.length === 0)) {

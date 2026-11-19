@@ -314,8 +314,8 @@ export class ERaktKoshProxyService {
         if (typeof bankLat !== 'number' || typeof bankLng !== 'number') continue;
 
         const distanceKm = haversineDistance(params.lat, params.lng, bankLat, bankLng);
-        // Include banks within radius (allow 1.5x preset for rural/border coverage)
-        if (distanceKm > radiusKm * 1.5) continue;
+        // Include banks strictly within requested search radius
+        if (distanceKm > radiusKm) continue;
 
         const city = props.city || props.district || props.county || 'City';
         const district = props.district || props.city || 'District';

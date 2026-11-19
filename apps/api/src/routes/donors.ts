@@ -99,7 +99,7 @@ donorRoutes.post(
       if (!ticketResult.success) {
         return c.json({ error: ticketResult.error }, 401);
       }
-    } else if (process.env.NODE_ENV === 'production') {
+    } else if (process.env.NODE_ENV !== 'test' || process.env.TEST_REQUIRE_TICKET === 'true') {
       return c.json(
         { error: 'A valid single-use phone verification ticket is required for registration' },
         401
@@ -528,9 +528,17 @@ donorRoutes.patch('/profile/:id/availability', async (c) => {
 
   if (isLiveDb()) {
     try {
-      await db.update(donorProfiles)
+      const updatedRows = await db
+        .update(donorProfiles)
         .set({ isAvailable: body.isAvailable, updatedAt: new Date() })
-        .where(eq(donorProfiles.id, id));
+        .where(eq(donorProfiles.id, id))
+        .returning({ id: donorProfiles.id });
+
+      if (!updatedRows || updatedRows.length === 0) {
+        return c.json({ error: 'Donor not found' }, 404);
+      }
+
+      return c.json({ success: true, isAvailable: body.isAvailable });
     } catch (error) {
       console.error('[@repo/api] Failed to update donor availability:', error);
       return c.json({ error: 'Unable to update donor availability' }, 500);
@@ -538,7 +546,7 @@ donorRoutes.patch('/profile/:id/availability', async (c) => {
   }
 
   const updated = mockStore.updateDonorAvailability(id, body.isAvailable);
-  if (!updated && !isLiveDb()) {
+  if (!updated) {
     return c.json({ error: 'Donor not found' }, 404);
   }
 

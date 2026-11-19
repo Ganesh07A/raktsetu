@@ -8,7 +8,11 @@ let client: postgres.Sql;
 let dbInstance: ReturnType<typeof drizzle<typeof schema>>;
 
 if (connectionString) {
-  client = postgres(connectionString, { max: 10, idle_timeout: 20 });
+  client = postgres(connectionString, {
+    prepare: false,
+    max: 10,
+    idle_timeout: 20,
+  });
   dbInstance = drizzle(client, { schema });
 } else {
   // Graceful fallback for offline / build / CI environments without DATABASE_URL

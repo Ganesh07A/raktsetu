@@ -117,7 +117,10 @@ export default function DonorRegistrationPage() {
           }
           if (Notification.permission === 'granted') {
             const { getWebPushToken } = await import('../../../../src/lib/firebase-messaging');
-            fcmToken = await getWebPushToken().catch(() => undefined);
+            fcmToken = await getWebPushToken().catch((err) => {
+              console.error('[@repo/web-push] Failed to obtain FCM token:', err);
+              return undefined;
+            });
             if (fcmToken) {
               localStorage.setItem('raktkhoj_fcm_token', fcmToken);
               localStorage.setItem('raktkhoj_fcm_enabled', 'true');
@@ -187,16 +190,35 @@ export default function DonorRegistrationPage() {
     }
   };
 
-  // Step 4: GPS auto detection
+  // Step 4: GPS auto detection with reverse geocoding
   const handleDetectGps = () => {
     if (typeof window !== 'undefined' && navigator.geolocation) {
       setGpsLoading(true);
       navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setLatitude(pos.coords.latitude);
-          setLongitude(pos.coords.longitude);
+        async (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          setLatitude(lat);
+          setLongitude(lng);
           setUseGps(true);
-          setGpsLoading(false);
+          try {
+            const rev = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`,
+              { headers: { Accept: 'application/json' } }
+            );
+            if (rev.ok) {
+              const data = await rev.json();
+              const addr = data.address || {};
+              if (addr.state) setState(addr.state);
+              const detectedDistrict =
+                addr.state_district || addr.county || addr.city || addr.town || addr.district;
+              if (detectedDistrict) setDistrict(detectedDistrict);
+            }
+          } catch (e) {
+            console.warn('Reverse geocoding error:', e);
+          } finally {
+            setGpsLoading(false);
+          }
         },
         () => {
           setGpsLoading(false);
@@ -704,8 +726,8 @@ export default function DonorRegistrationPage() {
                 <label className="text-xs font-bold text-slate-700">
                   {isHi ? 'अधिकतम यात्रा दायरा (Willing Radius)' : 'Willing Travel Radius'}
                 </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[5, 10, 25].map((r) => (
+                <div className="grid grid-cols-4 gap-2">
+                  {[5, 10, 25, 50].map((r) => (
                     <button
                       key={r}
                       type="button"

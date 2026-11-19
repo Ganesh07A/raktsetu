@@ -11,8 +11,8 @@ const scriptSrc = isProduction
   : `'self' 'unsafe-eval' 'unsafe-inline' https://www.gstatic.com`;
 
 const connectSrc = isProduction
-  ? `'self' https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.bigdatacloud.net https://fcm.googleapis.com https://firebaseinstallations.googleapis.com https://*.firebaseio.com https://identitytoolkit.googleapis.com https://www.gstatic.com https://raktsetu-api-fsyx.onrender.com`
-  : `'self' https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.bigdatacloud.net https://fcm.googleapis.com https://firebaseinstallations.googleapis.com https://*.firebaseio.com https://identitytoolkit.googleapis.com https://www.gstatic.com https://raktsetu-api-fsyx.onrender.com http://localhost:3002 ws://localhost:* http://localhost:*`;
+  ? `'self' https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.bigdatacloud.net https://fcm.googleapis.com https://fcmregistrations.googleapis.com https://firebaseinstallations.googleapis.com https://*.firebaseio.com https://identitytoolkit.googleapis.com https://www.gstatic.com https://raktsetu-api-fsyx.onrender.com`
+  : `'self' https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.bigdatacloud.net https://fcm.googleapis.com https://fcmregistrations.googleapis.com https://firebaseinstallations.googleapis.com https://*.firebaseio.com https://identitytoolkit.googleapis.com https://www.gstatic.com https://raktsetu-api-fsyx.onrender.com http://localhost:3002 ws://localhost:* http://localhost:*`;
 
 const cspHeader = `
   default-src 'self';

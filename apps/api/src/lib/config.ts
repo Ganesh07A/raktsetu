@@ -24,6 +24,11 @@ export interface ConfigReport {
     publicOrigin: string | null;
     fcmLinkUsable: boolean;
   };
+  telegram?: {
+    configured: boolean;
+    mode: 'polling' | 'webhook' | 'disabled';
+    username: string;
+  };
   cors: { origins: string[] };
 }
 
@@ -92,6 +97,11 @@ export function inspectConfig(): ConfigReport {
       publicOrigin,
       // Firebase Admin requires webpush.fcmOptions.link to be an absolute https URL.
       fcmLinkUsable: publicOrigin !== null && /^https:\/\/[^/\s]+/i.test(publicOrigin),
+    },
+    telegram: {
+      configured: Boolean(read('TELEGRAM_BOT_TOKEN')),
+      mode: (read('TELEGRAM_MODE') || 'polling') as 'polling' | 'webhook' | 'disabled',
+      username: read('TELEGRAM_BOT_USERNAME') || 'RaktKhojDonorBot',
     },
     cors: { origins: corsOrigins },
   };

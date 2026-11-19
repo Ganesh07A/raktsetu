@@ -555,11 +555,13 @@ export class RequestService {
           }
         }
       } catch (err) {
-        console.warn('[@repo/api] Error querying live DB for request, falling back to mockStore:', err);
+        console.error('[@repo/api] Error querying live DB for request:', err);
+        return null;
       }
+      return request ? { request, notifications, acceptedDonors } : null;
     }
 
-    // If not found in DB or DB offline, fallback to mockStore
+    // Only fallback to mockStore when DB is NOT configured (mock / test mode)
     if (!request) {
       request = mockStore.getRequest(id) || null;
       if (!request) return null;

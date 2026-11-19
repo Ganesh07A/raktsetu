@@ -7,3 +7,4 @@ export * from './blood-stock';
 
 export * from './donor-push-subscriptions';
 export * from './security-state';
+export * from './donor-telegram';

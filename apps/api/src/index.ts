@@ -6,6 +6,7 @@ import { donorRoutes } from './routes/donors';
 import { requestRoutes } from './routes/requests';
 import { pushRoutes } from './routes/push';
 import { authRoutes } from './routes/auth';
+import { telegramRoutes } from './routes/telegram';
 import { healthRoutes, readyRoutes } from './routes/health';
 import { logConfigProblems } from './lib/config';
 import { notificationOutbox } from './services/notification-outbox';
@@ -80,6 +81,7 @@ app.route('/api/v1/donors', donorRoutes);
 app.route('/api/v1/requests', requestRoutes);
 app.route('/api/v1/push', pushRoutes);
 app.route('/api/v1/auth', authRoutes);
+app.route('/api/v1/telegram', telegramRoutes);
 
 const port = Number(process.env.PORT || process.env.API_PORT || 3002);
 
@@ -94,6 +96,24 @@ if (process.env.NODE_ENV !== 'test' && process.env.OUTBOX_WORKER_ENABLED !== 'fa
   };
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
+}
+
+if (
+  process.env.NODE_ENV !== 'test' &&
+  process.env.TELEGRAM_BOT_TOKEN &&
+  (process.env.TELEGRAM_MODE === 'polling' || !process.env.TELEGRAM_MODE)
+) {
+  import('./services/telegram/telegram-polling').then(({ telegramPolling }) => {
+    telegramPolling.start().catch((err) => {
+      console.warn('[@repo/api-telegram] Failed to start Telegram polling:', err?.message || err);
+    });
+
+    const shutdownTg = () => {
+      telegramPolling.stop().catch(() => undefined);
+    };
+    process.on('SIGTERM', shutdownTg);
+    process.on('SIGINT', shutdownTg);
+  });
 }
 
 export default { port, fetch: app.fetch };

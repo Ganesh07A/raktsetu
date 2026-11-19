@@ -118,25 +118,14 @@ export class OtpService {
       };
     }
 
-    // Dispatch FCM push notification to client device and subscribed test devices
-    try {
-      const tokens: string[] = [];
-      if (fcmToken) tokens.push(fcmToken);
-
-      if (process.env.DATABASE_URL && process.env.MOCK_SERVICES !== 'true') {
-        const { db, donorPushSubscriptions } = await import('@repo/db');
-        const activeSubs = await db.select({ token: donorPushSubscriptions.fcmToken }).from(donorPushSubscriptions);
-        for (const sub of activeSubs) {
-          if (sub.token) tokens.push(sub.token);
-        }
-      }
-
-      if (tokens.length > 0) {
+    // Dispatch FCM push notification ONLY to the requesting device's fcmToken (if provided)
+    if (fcmToken) {
+      try {
         const { pushNotificationService } = await import('./push-notifications');
-        await pushNotificationService.sendOtpNotification(tokens, otp, phone);
+        await pushNotificationService.sendOtpNotification([fcmToken], otp, phone);
+      } catch (pushErr) {
+        console.warn('[@repo/api] FCM OTP dispatch notice:', pushErr);
       }
-    } catch (pushErr) {
-      console.warn('[@repo/api] FCM OTP dispatch notice:', pushErr);
     }
 
     return {

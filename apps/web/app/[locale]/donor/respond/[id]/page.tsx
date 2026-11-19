@@ -206,6 +206,31 @@ export default function DonorRespondPage() {
     );
   }
 
+  if (request && (request.status === 'cancelled' || request.status === 'expired')) {
+    return (
+      <div className="max-w-xl mx-auto py-10 text-center space-y-5">
+        <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto">
+          <AlertTriangle className="h-8 w-8" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-xl sm:text-2xl font-bold text-slate-900">
+            {isHi ? 'यह अनुरोध बंद हो चुका है' : 'This Request is No Longer Active'}
+          </h2>
+          <p className="text-sm text-slate-600 max-w-md mx-auto">
+            {isHi
+              ? 'मरीज के परिवार ने इस खोज को समाप्त कर दिया है या आवश्यक सहायता प्राप्त हो चुकी है।'
+              : 'The patient’s family has closed this search or received help. Thank you for your readiness to save lives!'}
+          </p>
+        </div>
+        <Button asChild variant="outline" className="border-slate-300">
+          <Link href="/donor/dashboard">
+            <span>{isHi ? 'डैशबोर्ड पर जाएं' : 'Go to Dashboard'}</span>
+          </Link>
+        </Button>
+      </div>
+    );
+  }
+
   if (respondedStatus === 'declined') {
     return (
       <div className="max-w-xl mx-auto py-10 text-center space-y-5">

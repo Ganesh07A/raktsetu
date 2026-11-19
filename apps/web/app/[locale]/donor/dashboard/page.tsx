@@ -17,6 +17,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { PushNotificationOptIn } from '../../../components/push-notification-opt-in';
+import { TelegramNotificationOptIn } from '../../../components/telegram-notification-opt-in';
 
 const API_BASE = typeof window !== 'undefined' ? '' : (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3002');
 
@@ -273,6 +274,7 @@ export default function DonorDashboardPage() {
       </div>
 
       <PushNotificationOptIn />
+      <TelegramNotificationOptIn />
 
       {pendingRequests.length > 0 && (
         <div className="space-y-3 rounded-2xl border-2 border-red-500 bg-red-50/80 p-5 shadow-lg">

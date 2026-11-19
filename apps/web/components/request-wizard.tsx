@@ -178,7 +178,7 @@ export function RequestWizard() {
   }, [activeRegionHospitals, isHospitalOptional]);
 
   // Blood Bank Screen
-  const [radiusKm, setRadiusKm] = React.useState<25 | 50 | 100>(25);
+  const [radiusKm, setRadiusKm] = React.useState<5 | 10 | 50>(10);
   const [banksList, setBanksList] = React.useState<any[]>([]);
   const [banksLoading, setBanksLoading] = React.useState(false);
   const [banksError, setBanksError] = React.useState<string | null>(null);
@@ -192,7 +192,7 @@ export function RequestWizard() {
   const [patientName, setPatientName] = React.useState('');
   const [patientAge, setPatientAge] = React.useState('');
   const [patientGender, setPatientGender] = React.useState('Prefer not to say');
-  const [unitsNeeded, setUnitsNeeded] = React.useState<number>(6);
+  const [unitsNeeded, setUnitsNeeded] = React.useState<number>(1);
 
   // Step 5: Component
   const [selectedComponent, setSelectedComponent] = React.useState('whole_blood');
@@ -492,7 +492,7 @@ export function RequestWizard() {
     }
   };
 
-  const fetchBloodBanks = async (searchRadius: 25 | 50 | 100) => {
+  const fetchBloodBanks = async (searchRadius: 5 | 10 | 50) => {
     if (!isLocationResolved) {
       setBanksError(isHi ? 'पहले मानचित्र पर अपना स्थान तय करें।' : 'Resolve your location before searching for blood banks.');
       return;
@@ -1441,7 +1441,7 @@ export function RequestWizard() {
             {/* Radius Filter Pills */}
             <div className="p-4 border-b border-slate-100 bg-white">
               <div className="flex items-center gap-2 justify-center">
-                {([25, 50, 100] as const).map((r) => (
+                {([5, 10, 50] as const).map((r) => (
                   <button
                     key={r}
                     type="button"
@@ -1722,8 +1722,16 @@ export function RequestWizard() {
             <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-white/95 backdrop-blur-md border-t border-slate-100 z-30">
               <Button
                 type="button"
-                onClick={() => goToStep('STEP_5_COMPONENT')}
-                className="w-full h-12 rounded-xl text-base font-semibold shadow-md bg-rose-500 hover:bg-rose-600 text-white active:scale-[0.99]"
+                disabled={!patientName.trim()}
+                onClick={() => {
+                  if (!patientName.trim()) return;
+                  goToStep('STEP_5_COMPONENT');
+                }}
+                className={`w-full h-12 rounded-xl text-base font-semibold shadow-md ${
+                  !patientName.trim()
+                    ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                    : 'bg-rose-500 hover:bg-rose-600 text-white active:scale-[0.99]'
+                }`}
               >
                 {isHi ? 'आगे बढ़ें' : 'Continue'}
               </Button>
